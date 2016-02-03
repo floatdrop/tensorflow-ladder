@@ -1,4 +1,5 @@
 import tensorflow as tf
+import batch_normalization
 
 class _Record:
   pass
@@ -19,10 +20,11 @@ def _bias_variable(shape):
 
 def _fully_connected_relu_layer(inputs, unit_count):
   input_unit_count = inputs.get_shape()[1].value
-
   weights = _weight_variable([input_unit_count, unit_count])
   biases = _bias_variable([unit_count])
-  return tf.nn.relu(tf.matmul(inputs, weights) + biases)
+  results = tf.nn.relu(tf.matmul(inputs, weights) + biases)
+  (normalized_results, update_assignments) = batch_normalization.normalize(results, train = True)
+  return normalized_results
 
 def _softmax_layer(inputs, unit_count):
   input_unit_count = inputs.get_shape()[1].value
