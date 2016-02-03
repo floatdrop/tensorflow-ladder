@@ -1,74 +1,42 @@
-## Adapted from http://stackoverflow.com/a/33950177
-
-"""A helper class for managing batch normalization state.
-
-This class is designed to simplify adding batch normalization
-(http://arxiv.org/pdf/1502.03167v3.pdf) to your model by
-managing the state variables associated with it.
-
-Important use note:  The function get_assigner() returns
-an op that must be executed to save the updated state.
-A suggested way to do this is to make execution of the
-model optimizer force it, e.g., by:
-
-  update_assignments = tf.group(bn1.get_assigner(),
-                                bn2.get_assigner())
-  with tf.control_dependencies([optimizer]):
-    optimizer = tf.group(update_assignments)
-
-"""
+## Adapted from http://stackoverflow.com/a/34634291/64979
 
 import tensorflow as tf
+from tensorflow.python import control_flow_ops
 
-def normalize(inputs, train = True):
-  depth = inputs.get_shape()[1].value
-  normalizer = BatchNormalizer(depth, scale_after_norm = True)
-  update_assignments = normalizer.get_assigner()
-
-  inputs_4d = tf.reshape(inputs, [-1, 1, 1, depth])
-  outputs_4d = normalizer.normalize(inputs_4d, train = train)
-  outputs = tf.reshape(outputs_4d, [-1, depth])
-  return (outputs, update_assignments)
-
-class BatchNormalizer(object):
-  """Helper class that groups the normalization logic and variables.
-
-  Use:
-      ewma = tf.train.ExponentialMovingAverage(decay=0.99)
-      bn = ConvolutionalBatchNormalizer(depth, 0.001, ewma, True)
-      update_assignments = bn.get_assigner()
-      x = bn.normalize(y, train=training?)
-      (the output x will be batch-normalized).
+def batch_norm(inputs, training_phase, scope = 'bn'):
   """
+  Batch normalization for fully connected layers.
+  Args:
+    inputs:         2D Tensor, batch size * layer width
+    training_phase: boolean tf.Variable, true indicates training phase
+    scope:          string, variable scope
+  Return:
+    normed:         batch-normalized map
+  """
+  depth = inputs.get_shape()[-1].value
+  inputs_4d = tf.reshape(inputs, [-1, 1, 1, depth])
 
-  def __init__(self, depth, scale_after_norm):
-    self.mean = tf.Variable(tf.constant(0.0, shape = [depth]),
-                            trainable = False)
-    self.variance = tf.Variable(tf.constant(1.0, shape = [depth]),
-                                trainable = False)
-    self.beta = tf.Variable(tf.constant(0.0, shape = [depth]))
-    self.gamma = tf.Variable(tf.constant(1.0, shape = [depth]))
-    self.ewma_trainer = tf.train.ExponentialMovingAverage(decay = 0.99)
-    self.epsilon = 1e-5
-    self.scale_after_norm = scale_after_norm
+  with tf.variable_scope(scope):
+    beta = tf.Variable(tf.constant(0.0, shape = [depth]),
+      name = 'beta', trainable = True)
+    gamma = tf.Variable(tf.constant(1.0, shape = [depth]),
+      name = 'gamma', trainable = True)
 
-  def get_assigner(self):
-    """Returns an EWMA apply op that must be invoked after optimization."""
-    return self.ewma_trainer.apply([self.mean, self.variance])
+    batch_mean, batch_var = tf.nn.moments(inputs_4d, [0, 1, 2], name = 'moments')
+    ema = tf.train.ExponentialMovingAverage(decay = 0.9)
+    ema_apply_op = ema.apply([batch_mean, batch_var])
+    ema_mean, ema_var = ema.average(batch_mean), ema.average(batch_var)
 
-  def normalize(self, x, train = True):
-    """Returns a batch-normalized version of x."""
-    if train:
-      mean, variance = tf.nn.moments(x, [0, 1, 2])
-      assign_mean = self.mean.assign(mean)
-      assign_variance = self.variance.assign(variance)
-      with tf.control_dependencies([assign_mean, assign_variance]):
-        return tf.nn.batch_norm_with_global_normalization(
-            x, mean, variance, self.beta, self.gamma,
-            self.epsilon, self.scale_after_norm)
-    else:
-      mean = self.ewma_trainer.average(self.mean)
-      variance = self.ewma_trainer.average(self.variance)
-      return tf.nn.batch_norm_with_global_normalization(
-          x, mean, variance, self.beta, self.gamma,
-          self.epsilon, self.scale_after_norm)
+    def mean_var_with_update():
+      with tf.control_dependencies([ema_apply_op]):
+        return tf.identity(batch_mean), tf.identity(batch_var)
+
+    mean, var = control_flow_ops.cond(training_phase,
+      mean_var_with_update,
+      lambda: (ema_mean, ema_var))
+
+    normed_4d = tf.nn.batch_norm_with_global_normalization(inputs_4d, mean, var,
+      beta, gamma, 1e-3, scale_after_normalization = True)
+    normed = tf.reshape(normed_4d, [-1, depth])
+
+  return normed

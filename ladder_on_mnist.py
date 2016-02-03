@@ -9,7 +9,7 @@ model = ladder_network.Model(
 )
 
 with ladder_network.Session(model) as session:
-  for i in range(100):
+  for i in range(10):
     for j in range(100):
       session.train_batch(*mnist.train.next_batch(100))
 

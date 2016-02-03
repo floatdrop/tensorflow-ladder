@@ -1,13 +1,14 @@
 import tensorflow as tf
-import batch_normalization
+from batch_normalization import batch_norm
 
 class _Record:
   pass
 
 def _build_data_placeholders(input_unit_count, class_count):
   placeholders = _Record()
-  placeholders.inputs = tf.placeholder(tf.float32, [None, input_unit_count])
-  placeholders.labels = tf.placeholder(tf.float32, [None, class_count])
+  placeholders.inputs = tf.placeholder(tf.float32, [None, input_unit_count], name = 'inputs')
+  placeholders.labels = tf.placeholder(tf.float32, [None, class_count], name = 'labels')
+  placeholders.training_phase = tf.placeholder(tf.bool, name = 'training_phase')
   return placeholders
 
 def _weight_variable(shape):
@@ -18,12 +19,12 @@ def _bias_variable(shape):
   initial = tf.constant(0.1, shape = shape)
   return tf.Variable(initial)
 
-def _fully_connected_relu_layer(inputs, unit_count):
+def _fully_connected_relu_layer(inputs, unit_count, training_phase):
   input_unit_count = inputs.get_shape()[1].value
   weights = _weight_variable([input_unit_count, unit_count])
   biases = _bias_variable([unit_count])
   results = tf.nn.relu(tf.matmul(inputs, weights) + biases)
-  (normalized_results, update_assignments) = batch_normalization.normalize(results, train = True)
+  normalized_results = batch_norm(results, training_phase = training_phase)
   return normalized_results
 
 def _softmax_layer(inputs, unit_count):
@@ -37,7 +38,7 @@ def _build_forward_pass(placeholders):
   input_unit_count = placeholders.inputs.get_shape()[1].value
   class_count = placeholders.labels.get_shape()[1].value
 
-  activations1 = _fully_connected_relu_layer(placeholders.inputs, 100)
+  activations1 = _fully_connected_relu_layer(placeholders.inputs, 100, training_phase = placeholders.training_phase)
   activations2 = _softmax_layer(activations1, 10)
 
   outputs = _Record()
@@ -61,12 +62,13 @@ class Model:
     self.train_step = _build_train_step(self.placeholders, self.outputs, learning_rate)
     self.accuracy_measure = _build_accuracy_measure(self.placeholders, self.outputs)
 
-  def fill_placeholders(self, inputs = None, labels = None):
+  def fill_placeholders(self, inputs = None, labels = None, training_phase = True):
     replacements = {}
     if inputs is not None:
       replacements[self.placeholders.inputs] = inputs
     if labels is not None:
       replacements[self.placeholders.labels] = labels
+    replacements[self.placeholders.training_phase] = training_phase
     return replacements
 
 class Session:
@@ -82,7 +84,7 @@ class Session:
     self.session.close()
 
   def train_batch(self, inputs, labels):
-    return self.session.run(self.model.train_step, self.model.fill_placeholders(inputs, labels))
+    return self.session.run(self.model.train_step, self.model.fill_placeholders(inputs, labels, training_phase = True))
 
   def test(self, inputs, labels):
-    return self.session.run(self.model.accuracy_measure, self.model.fill_placeholders(inputs, labels))
+    return self.session.run(self.model.accuracy_measure, self.model.fill_placeholders(inputs, labels, training_phase = False))
