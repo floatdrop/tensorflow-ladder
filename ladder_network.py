@@ -34,23 +34,30 @@ def _softmax_layer(inputs, unit_count):
   biases = _bias_variable([unit_count])
   return tf.nn.softmax(tf.matmul(inputs, weights) + biases)
 
-def _build_forward_pass(placeholders):
-  input_unit_count = placeholders.inputs.get_shape()[1].value
-  class_count = placeholders.labels.get_shape()[1].value
-
-  activations1 = _fully_connected_relu_layer(placeholders.inputs, 100, training_phase = placeholders.training_phase)
-  activations2 = _softmax_layer(activations1, 10)
-
-  outputs = _Record()
-  outputs.label_probabilities = activations2
+def _build_encoder_layers(placeholders, layer_sizes):
+  outputs = []
+  previous_output = placeholders.inputs
+  for layer_size in layer_sizes:
+    previous_output = _fully_connected_relu_layer(previous_output, layer_size, placeholders.training_phase)
+    outputs.append(previous_output)
   return outputs
 
-def _build_train_step(placeholders, outputs, learning_rate):
-  cross_entropy = -tf.reduce_sum(placeholders.labels * tf.log(outputs.label_probabilities))
+def _build_forward_pass(placeholders):
+  class_count = placeholders.labels.get_shape()[1].value
+
+  encoder_outputs = _build_encoder_layers(placeholders, [100])
+  softmax_output = _softmax_layer(encoder_outputs[-1], class_count)
+
+  output = _Record()
+  output.label_probabilities = softmax_output
+  return output
+
+def _build_train_step(placeholders, output, learning_rate):
+  cross_entropy = -tf.reduce_sum(placeholders.labels * tf.log(output.label_probabilities))
   return tf.train.GradientDescentOptimizer(learning_rate).minimize(cross_entropy)
 
-def _build_accuracy_measure(placeholders, outputs):
-  correct_prediction = tf.equal(tf.argmax(outputs.label_probabilities, 1), tf.argmax(placeholders.labels, 1))
+def _build_accuracy_measure(placeholders, output):
+  correct_prediction = tf.equal(tf.argmax(output.label_probabilities, 1), tf.argmax(placeholders.labels, 1))
   return tf.reduce_mean(tf.cast(correct_prediction, "float"))
 
 class Model:
@@ -58,9 +65,9 @@ class Model:
     learning_rate = 0.001
 
     self.placeholders = _build_data_placeholders(input_unit_count, class_count)
-    self.outputs = _build_forward_pass(self.placeholders)
-    self.train_step = _build_train_step(self.placeholders, self.outputs, learning_rate)
-    self.accuracy_measure = _build_accuracy_measure(self.placeholders, self.outputs)
+    self.output = _build_forward_pass(self.placeholders)
+    self.train_step = _build_train_step(self.placeholders, self.output, learning_rate)
+    self.accuracy_measure = _build_accuracy_measure(self.placeholders, self.output)
 
   def fill_placeholders(self, inputs = None, labels = None, training_phase = True):
     replacements = {}
