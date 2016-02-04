@@ -4,9 +4,9 @@ from batch_normalization import batch_norm
 class _Record:
   pass
 
-def _build_data_placeholders(input_unit_count, class_count):
+def _build_data_placeholders(input_layer_size, class_count):
   placeholders = _Record()
-  placeholders.inputs = tf.placeholder(tf.float32, [None, input_unit_count], name = 'inputs')
+  placeholders.inputs = tf.placeholder(tf.float32, [None, input_layer_size], name = 'inputs')
   placeholders.labels = tf.placeholder(tf.float32, [None, class_count], name = 'labels')
   placeholders.training_phase = tf.placeholder(tf.bool, name = 'training_phase')
   return placeholders
@@ -19,34 +19,36 @@ def _bias_variable(shape):
   initial = tf.constant(0.1, shape = shape)
   return tf.Variable(initial)
 
-def _fully_connected_relu_layer(inputs, unit_count, training_phase):
-  input_unit_count = inputs.get_shape()[1].value
-  weights = _weight_variable([input_unit_count, unit_count])
+def _fully_connected_layer(inputs, output_size, non_linearity, training_phase):
+  input_size = inputs.get_shape()[1].value
+  weights = _weight_variable([input_size, output_size])
   linear = batch_norm(tf.matmul(inputs, weights), training_phase = training_phase)
-  return tf.nn.relu(linear)
+  return non_linearity(linear)
 
-def _softmax_layer(inputs, unit_count, training_phase):
-  input_unit_count = inputs.get_shape()[1].value
-  weights = _weight_variable([input_unit_count, unit_count])
-  linear = batch_norm(tf.matmul(inputs, weights), training_phase = training_phase)
-  return tf.nn.softmax(linear)
-
-def _build_encoder_layers(placeholders, layer_sizes):
-  outputs = []
-  previous_output = placeholders.inputs
-  for layer_size in layer_sizes:
-    previous_output = _fully_connected_relu_layer(previous_output, layer_size, placeholders.training_phase)
-    outputs.append(previous_output)
-  return outputs
+def _build_encoder_layers(placeholders, layer_definitions):
+  layer_outputs = [placeholders.inputs]
+  for (layer_size, non_linearity) in layer_definitions:
+    layer_output = _fully_connected_layer(
+      inputs = layer_outputs[-1],
+      output_size = layer_size,
+      non_linearity = non_linearity,
+      training_phase = placeholders.training_phase
+    )
+    layer_outputs.append(layer_output)
+  return layer_outputs
 
 def _build_forward_pass(placeholders):
   class_count = placeholders.labels.get_shape()[1].value
 
-  encoder_outputs = _build_encoder_layers(placeholders, [100])
-  softmax_output = _softmax_layer(encoder_outputs[-1], class_count, placeholders.training_phase)
+  encoder_layers = [
+    (100, tf.nn.relu),
+    (50, tf.nn.relu),
+    (class_count, tf.nn.softmax)
+  ]
+  encoder_outputs = _build_encoder_layers(placeholders, encoder_layers)
 
   output = _Record()
-  output.label_probabilities = softmax_output
+  output.label_probabilities = encoder_outputs[-1]
   return output
 
 def _build_train_step(placeholders, output, learning_rate):
@@ -58,10 +60,10 @@ def _build_accuracy_measure(placeholders, output):
   return tf.reduce_mean(tf.cast(correct_prediction, "float"))
 
 class Model:
-  def __init__(self, input_unit_count, class_count):
+  def __init__(self, input_layer_size, class_count):
     learning_rate = 0.001
 
-    self.placeholders = _build_data_placeholders(input_unit_count, class_count)
+    self.placeholders = _build_data_placeholders(input_layer_size, class_count)
     self.output = _build_forward_pass(self.placeholders)
     self.train_step = _build_train_step(self.placeholders, self.output, learning_rate)
     self.accuracy_measure = _build_accuracy_measure(self.placeholders, self.output)

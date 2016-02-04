@@ -4,7 +4,7 @@ import ladder_network
 mnist = input_data.read_data_sets("MNIST_data/", one_hot=True)
 
 model = ladder_network.Model(
-  input_unit_count = 784,
+  input_layer_size = 784,
   class_count = 10
 )
 
