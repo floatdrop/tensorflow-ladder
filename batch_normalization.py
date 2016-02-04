@@ -3,15 +3,15 @@
 import tensorflow as tf
 from tensorflow.python import control_flow_ops
 
-def batch_norm(inputs, training_phase, scope = 'bn'):
+def batch_norm(inputs, is_training_phase, scope = 'bn'):
   """
   Batch normalization for fully connected layers.
   Args:
-    inputs:         2D Tensor, batch size * layer width
-    training_phase: boolean tf.Variable, true indicates training phase
-    scope:          string, variable scope
+    inputs:            2D Tensor, batch size * layer width
+    is_training_phase: boolean tf.Variable, true indicates training phase
+    scope:             string, variable scope
   Return:
-    normed:         batch-normalized map
+    normed:            batch-normalized map
   """
   depth = inputs.get_shape()[-1].value
   inputs_4d = tf.reshape(inputs, [-1, 1, 1, depth])
@@ -31,7 +31,7 @@ def batch_norm(inputs, training_phase, scope = 'bn'):
       with tf.control_dependencies([ema_apply_op]):
         return tf.identity(batch_mean), tf.identity(batch_var)
 
-    mean, var = control_flow_ops.cond(training_phase,
+    mean, var = control_flow_ops.cond(is_training_phase,
       mean_var_with_update,
       lambda: (ema_mean, ema_var))
 

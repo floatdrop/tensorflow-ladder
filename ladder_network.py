@@ -8,7 +8,7 @@ def _build_data_placeholders(input_layer_size, class_count):
   placeholders = _Record()
   placeholders.inputs = tf.placeholder(tf.float32, [None, input_layer_size], name = 'inputs')
   placeholders.labels = tf.placeholder(tf.float32, [None, class_count], name = 'labels')
-  placeholders.training_phase = tf.placeholder(tf.bool, name = 'training_phase')
+  placeholders.is_training_phase = tf.placeholder(tf.bool, name = 'is_training_phase')
   return placeholders
 
 def _weight_variable(shape):
@@ -22,30 +22,34 @@ def _bias_variable(shape):
 def _layer_size(layer_output):
   return layer_output.get_shape()[1].value
 
-def _fully_connected_layer(inputs, output_size, non_linearity, training_phase):
+def _fully_connected_layer(inputs, output_size, non_linearity, is_training_phase):
   weights = _weight_variable([_layer_size(inputs), output_size])
-  linear = batch_norm(tf.matmul(inputs, weights), training_phase = training_phase)
+  linear = batch_norm(tf.matmul(inputs, weights), is_training_phase = is_training_phase)
   return non_linearity(linear)
 
-def _build_encoder_layers(placeholders, layer_definitions):
-  layer_outputs = [placeholders.inputs]
-  for (layer_size, non_linearity) in layer_definitions:
+def _build_encoder_layers(input_layer, other_layer_definitions, is_training_phase):
+  layer_outputs = [input_layer]
+  for (layer_size, non_linearity) in other_layer_definitions:
     layer_output = _fully_connected_layer(
       inputs = layer_outputs[-1],
       output_size = layer_size,
       non_linearity = non_linearity,
-      training_phase = placeholders.training_phase
+      is_training_phase = is_training_phase
     )
     layer_outputs.append(layer_output)
   return layer_outputs
 
 def _build_forward_pass(placeholders):
-  encoder_layers = [
+  encoder_layer_definitions = [
     (100, tf.nn.relu),
     (50, tf.nn.relu),
     (_layer_size(placeholders.labels), tf.nn.softmax)
   ]
-  encoder_outputs = _build_encoder_layers(placeholders, encoder_layers)
+  encoder_outputs = _build_encoder_layers(
+    input_layer = placeholders.inputs,
+    other_layer_definitions = encoder_layer_definitions,
+    is_training_phase = placeholders.is_training_phase
+  )
 
   output = _Record()
   output.label_probabilities = encoder_outputs[-1]
@@ -68,13 +72,13 @@ class Model:
     self.train_step = _build_train_step(self.placeholders, self.output, learning_rate)
     self.accuracy_measure = _build_accuracy_measure(self.placeholders, self.output)
 
-  def fill_placeholders(self, inputs = None, labels = None, training_phase = True):
+  def fill_placeholders(self, inputs = None, labels = None, is_training_phase = True):
     replacements = {}
     if inputs is not None:
       replacements[self.placeholders.inputs] = inputs
     if labels is not None:
       replacements[self.placeholders.labels] = labels
-    replacements[self.placeholders.training_phase] = training_phase
+    replacements[self.placeholders.is_training_phase] = is_training_phase
     return replacements
 
 class Session:
@@ -90,7 +94,7 @@ class Session:
     self.session.close()
 
   def train_batch(self, inputs, labels):
-    return self.session.run(self.model.train_step, self.model.fill_placeholders(inputs, labels, training_phase = True))
+    return self.session.run(self.model.train_step, self.model.fill_placeholders(inputs, labels, is_training_phase = True))
 
   def test(self, inputs, labels):
-    return self.session.run(self.model.accuracy_measure, self.model.fill_placeholders(inputs, labels, training_phase = False))
+    return self.session.run(self.model.accuracy_measure, self.model.fill_placeholders(inputs, labels, is_training_phase = False))
