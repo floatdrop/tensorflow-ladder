@@ -1,5 +1,6 @@
 import tensorflow as tf
 from batch_normalization import batch_norm
+from time import strftime
 
 class _Record:
   pass
@@ -74,11 +75,16 @@ def _build_forward_pass(placeholders):
   return output
 
 def _build_train_step(placeholders, output, learning_rate):
-  cross_entropy = -tf.reduce_sum(placeholders.labels * tf.log(output.label_probabilities))
-  autoencoder_error = tf.reduce_sum(tf.pow(placeholders.inputs - output.autoencoded_inputs, 2))
+  cross_entropy = -tf.reduce_mean(placeholders.labels * tf.log(output.label_probabilities))
+  autoencoder_cost = tf.reduce_mean(tf.pow(placeholders.inputs - output.autoencoded_inputs, 2))
 
-  total_cost = cross_entropy + 1e-4 * autoencoder_error
-  #total_cost = tf.Print(total_cost, [total_cost, cross_entropy, autoencoder_error])
+  total_cost = cross_entropy + 0.1 * autoencoder_cost
+
+  summaries = [
+    tf.scalar_summary("total cost", total_cost),
+    tf.scalar_summary("cross entropy", cross_entropy),
+    tf.scalar_summary("autoencoder cost", autoencoder_cost),
+  ]
 
   return tf.train.GradientDescentOptimizer(learning_rate).minimize(total_cost)
 
@@ -88,7 +94,7 @@ def _build_accuracy_measure(placeholders, output):
 
 class Model:
   def __init__(self, input_layer_size, class_count):
-    learning_rate = 0.001
+    learning_rate = 0.1
 
     self.placeholders = _build_data_placeholders(input_layer_size, class_count)
     self.output = _build_forward_pass(self.placeholders)
@@ -108,6 +114,8 @@ class Session:
   def __init__(self, model):
     self.session = tf.Session()
     self.model = model
+    self.summaries = tf.merge_all_summaries()
+    self.writer = tf.train.SummaryWriter(strftime("logs/%Y-%m-%d_%H:%M:%S"))
 
   def __enter__(self):
     self.session.run(tf.initialize_all_variables())
@@ -116,8 +124,10 @@ class Session:
   def __exit__(self, type, value, traceback):
     self.session.close()
 
-  def train_batch(self, inputs, labels):
-    return self.session.run(self.model.train_step, self.model.fill_placeholders(inputs, labels, is_training_phase = True))
+  def train_batch(self, inputs, labels, step_number):
+    train_result, summary = self.session.run([self.model.train_step, self.summaries], self.model.fill_placeholders(inputs, labels, is_training_phase = True))
+    self.writer.add_summary(summary, step_number)
+    return train_result
 
   def test(self, inputs, labels):
     return self.session.run(self.model.accuracy_measure, self.model.fill_placeholders(inputs, labels, is_training_phase = False))

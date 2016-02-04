@@ -9,8 +9,9 @@ model = ladder_network.Model(
 )
 
 with ladder_network.Session(model) as session:
-  for i in range(10):
+  for i in range(100):
     for j in range(100):
-      session.train_batch(*mnist.train.next_batch(100))
+      images, labels = mnist.train.next_batch(100)
+      session.train_batch(images, labels, i * 100 + j)
 
     print session.test(mnist.test.images, mnist.test.labels)
