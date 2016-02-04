@@ -25,11 +25,11 @@ def _fully_connected_relu_layer(inputs, unit_count, training_phase):
   linear = batch_norm(tf.matmul(inputs, weights), training_phase = training_phase)
   return tf.nn.relu(linear)
 
-def _softmax_layer(inputs, unit_count):
+def _softmax_layer(inputs, unit_count, training_phase):
   input_unit_count = inputs.get_shape()[1].value
   weights = _weight_variable([input_unit_count, unit_count])
-  biases = _bias_variable([unit_count])
-  return tf.nn.softmax(tf.matmul(inputs, weights) + biases)
+  linear = batch_norm(tf.matmul(inputs, weights), training_phase = training_phase)
+  return tf.nn.softmax(linear)
 
 def _build_encoder_layers(placeholders, layer_sizes):
   outputs = []
@@ -43,7 +43,7 @@ def _build_forward_pass(placeholders):
   class_count = placeholders.labels.get_shape()[1].value
 
   encoder_outputs = _build_encoder_layers(placeholders, [100])
-  softmax_output = _softmax_layer(encoder_outputs[-1], class_count)
+  softmax_output = _softmax_layer(encoder_outputs[-1], class_count, placeholders.training_phase)
 
   output = _Record()
   output.label_probabilities = softmax_output
