@@ -22,14 +22,11 @@ def _bias_variable(shape):
 def _fully_connected_relu_layer(inputs, unit_count, training_phase):
   input_unit_count = inputs.get_shape()[1].value
   weights = _weight_variable([input_unit_count, unit_count])
-  biases = _bias_variable([unit_count])
-  results = tf.nn.relu(tf.matmul(inputs, weights) + biases)
-  normalized_results = batch_norm(results, training_phase = training_phase)
-  return normalized_results
+  linear = batch_norm(tf.matmul(inputs, weights), training_phase = training_phase)
+  return tf.nn.relu(linear)
 
 def _softmax_layer(inputs, unit_count):
   input_unit_count = inputs.get_shape()[1].value
-  
   weights = _weight_variable([input_unit_count, unit_count])
   biases = _bias_variable([unit_count])
   return tf.nn.softmax(tf.matmul(inputs, weights) + biases)
