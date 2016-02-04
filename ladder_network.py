@@ -39,6 +39,18 @@ def _build_encoder_layers(input_layer, other_layer_definitions, is_training_phas
     layer_outputs.append(layer_output)
   return layer_outputs
 
+def _build_decoder_layers(encoder_layers, is_training_phase):
+  layer_outputs = [encoder_layers[-1]]
+  for encoder_layer in reversed(encoder_layers[:-1]):
+    layer_output = _fully_connected_layer(
+      inputs = layer_outputs[-1],
+      output_size = _layer_size(encoder_layer),
+      non_linearity = tf.nn.relu,
+      is_training_phase = is_training_phase
+    )
+    layer_outputs.append(layer_output)
+  return layer_outputs
+
 def _build_forward_pass(placeholders):
   encoder_layer_definitions = [
     (100, tf.nn.relu),
@@ -51,13 +63,24 @@ def _build_forward_pass(placeholders):
     is_training_phase = placeholders.is_training_phase
   )
 
+  decoder_outputs = _build_decoder_layers(
+    encoder_layers = encoder_outputs,
+    is_training_phase = placeholders.is_training_phase
+  )
+
   output = _Record()
   output.label_probabilities = encoder_outputs[-1]
+  output.autoencoded_inputs = decoder_outputs[-1]
   return output
 
 def _build_train_step(placeholders, output, learning_rate):
   cross_entropy = -tf.reduce_sum(placeholders.labels * tf.log(output.label_probabilities))
-  return tf.train.GradientDescentOptimizer(learning_rate).minimize(cross_entropy)
+  autoencoder_error = tf.reduce_sum(tf.pow(placeholders.inputs - output.autoencoded_inputs, 2))
+
+  total_cost = cross_entropy + 1e-4 * autoencoder_error
+  #total_cost = tf.Print(total_cost, [total_cost, cross_entropy, autoencoder_error])
+
+  return tf.train.GradientDescentOptimizer(learning_rate).minimize(total_cost)
 
 def _build_accuracy_measure(placeholders, output):
   correct_prediction = tf.equal(tf.argmax(output.label_probabilities, 1), tf.argmax(placeholders.labels, 1))
