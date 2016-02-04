@@ -19,9 +19,11 @@ def _bias_variable(shape):
   initial = tf.constant(0.1, shape = shape)
   return tf.Variable(initial)
 
+def _layer_size(layer_output):
+  return layer_output.get_shape()[1].value
+
 def _fully_connected_layer(inputs, output_size, non_linearity, training_phase):
-  input_size = inputs.get_shape()[1].value
-  weights = _weight_variable([input_size, output_size])
+  weights = _weight_variable([_layer_size(inputs), output_size])
   linear = batch_norm(tf.matmul(inputs, weights), training_phase = training_phase)
   return non_linearity(linear)
 
@@ -38,12 +40,10 @@ def _build_encoder_layers(placeholders, layer_definitions):
   return layer_outputs
 
 def _build_forward_pass(placeholders):
-  class_count = placeholders.labels.get_shape()[1].value
-
   encoder_layers = [
     (100, tf.nn.relu),
     (50, tf.nn.relu),
-    (class_count, tf.nn.softmax)
+    (_layer_size(placeholders.labels), tf.nn.softmax)
   ]
   encoder_outputs = _build_encoder_layers(placeholders, encoder_layers)
 
