@@ -1,4 +1,5 @@
 import tensorflow as tf
+import numpy
 from tensorflow.python import control_flow_ops
 from batch_normalization import batch_norm
 from time import strftime
@@ -11,7 +12,6 @@ def _build_data_placeholders(input_layer_size, class_count):
   placeholders.inputs = tf.placeholder(tf.float32, [None, input_layer_size], name = 'inputs')
   placeholders.labels = tf.placeholder(tf.float32, [None, class_count], name = 'labels')
   placeholders.is_training_phase = tf.placeholder(tf.bool, name = 'is_training_phase')
-  placeholders.is_supervised = tf.placeholder(tf.bool, name = 'is_supervised')
   return placeholders
 
 def _weight_variable(shape):
@@ -76,21 +76,18 @@ def _build_forward_pass(placeholders):
   output.autoencoded_inputs = decoder_outputs[-1]
   return output
 
-def _build_train_step(placeholders, output, learning_rate):
-  cross_entropy = control_flow_ops.cond(
-    placeholders.is_supervised,
-    lambda: -tf.reduce_mean(placeholders.labels * tf.log(output.label_probabilities)),
-    lambda: tf.constant(0.0)
-  )
-
+def _build_supervised_train_step(placeholders, output, learning_rate):
+  cross_entropy = -tf.reduce_mean(placeholders.labels * tf.log(output.label_probabilities))
   autoencoder_cost = tf.reduce_mean(tf.pow(placeholders.inputs - output.autoencoded_inputs, 2))
-
-  total_cost = cross_entropy + 0.1 * autoencoder_cost
-
+  total_cost = 10 * cross_entropy + autoencoder_cost
   tf.scalar_summary("cross entropy", cross_entropy)
-  tf.scalar_summary("autoencoder cost", autoencoder_cost)
-
+  tf.scalar_summary("autoencoder cost (supervised)", autoencoder_cost)
   return tf.train.GradientDescentOptimizer(learning_rate).minimize(total_cost)
+
+def _build_unsupervised_train_step(placeholders, output, learning_rate):
+  autoencoder_cost = tf.reduce_mean(tf.pow(placeholders.inputs - output.autoencoded_inputs, 2))
+  tf.scalar_summary("autoencoder cost", autoencoder_cost)
+  return tf.train.GradientDescentOptimizer(learning_rate).minimize(autoencoder_cost)
 
 def _build_accuracy_measure(placeholders, output):
   correct_prediction = tf.equal(tf.argmax(output.label_probabilities, 1), tf.argmax(placeholders.labels, 1))
@@ -98,19 +95,21 @@ def _build_accuracy_measure(placeholders, output):
 
 class Model:
   def __init__(self, input_layer_size, class_count):
-    learning_rate = 0.1
+    learning_rate = 0.01
 
     self.placeholders = _build_data_placeholders(input_layer_size, class_count)
     self.output = _build_forward_pass(self.placeholders)
-    self.train_step = _build_train_step(self.placeholders, self.output, learning_rate)
+    self.supervised_train_step = _build_supervised_train_step(self.placeholders, self.output, learning_rate)
+    self.unsupervised_train_step = _build_unsupervised_train_step(self.placeholders, self.output, learning_rate)
     self.accuracy_measure = _build_accuracy_measure(self.placeholders, self.output)
 
-  def fill_placeholders(self, inputs, labels, is_training_phase = True, is_supervised = True):
+  def fill_placeholders(self, inputs, labels = None, is_training_phase = True):
+    if labels is None:
+      labels = numpy.zeros([inputs.shape[0], _layer_size(self.placeholders.labels)])
     return {
       self.placeholders.inputs: inputs,
       self.placeholders.labels: labels,
-      self.placeholders.is_training_phase: is_training_phase,
-      self.placeholders.is_supervised: is_supervised
+      self.placeholders.is_training_phase: is_training_phase
     }
 
 class Session:
@@ -127,17 +126,27 @@ class Session:
   def __exit__(self, type, value, traceback):
     self.session.close()
 
-  def train_batch(self, inputs, labels, is_supervised, step_number):
+  def train_supervised_batch(self, inputs, labels, step_number):
     train_result, summary = self.session.run(
-      [self.model.train_step, self.summaries],
+      [self.model.supervised_train_step, self.summaries],
       self.model.fill_placeholders(
         inputs,
         labels,
-        is_training_phase = True,
-        is_supervised = is_supervised
+        is_training_phase = True
     ))
-    if is_supervised:
-      self.writer.add_summary(summary, step_number)
+
+    self.writer.add_summary(summary, step_number)
+    return train_result
+
+  def train_unsupervised_batch(self, inputs, step_number):
+    train_result, summary = self.session.run(
+      [self.model.unsupervised_train_step, self.summaries],
+      self.model.fill_placeholders(
+        inputs,
+        is_training_phase = True
+    ))
+
+    self.writer.add_summary(summary, step_number)
     return train_result
 
   def test(self, inputs, labels):
