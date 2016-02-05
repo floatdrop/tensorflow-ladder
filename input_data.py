@@ -176,6 +176,7 @@ def read_data_sets(train_dir, fake_data=False, one_hot=False):
   TEST_IMAGES = 't10k-images-idx3-ubyte.gz'
   TEST_LABELS = 't10k-labels-idx1-ubyte.gz'
   VALIDATION_SIZE = 5000
+  UNLABELED_SIZE = 40000
 
   local_file = maybe_download(TRAIN_IMAGES, train_dir)
   train_images = extract_images(local_file)
@@ -191,10 +192,15 @@ def read_data_sets(train_dir, fake_data=False, one_hot=False):
 
   validation_images = train_images[:VALIDATION_SIZE]
   validation_labels = train_labels[:VALIDATION_SIZE]
-  train_images = train_images[VALIDATION_SIZE:]
-  train_labels = train_labels[VALIDATION_SIZE:]
+  train_unlabeled_images = train_images[VALIDATION_SIZE:VALIDATION_SIZE+UNLABELED_SIZE]
+  train_unlabeled_labels = train_labels[VALIDATION_SIZE:VALIDATION_SIZE+UNLABELED_SIZE]
+  train_images = train_images[VALIDATION_SIZE+UNLABELED_SIZE:]
+  train_labels = train_labels[VALIDATION_SIZE+UNLABELED_SIZE:]
+
+  train_unlabeled_labels.fill(0)
 
   data_sets.train = DataSet(train_images, train_labels)
+  data_sets.train_unlabeled = DataSet(train_unlabeled_images, train_unlabeled_labels)
   data_sets.validation = DataSet(validation_images, validation_labels)
   data_sets.test = DataSet(test_images, test_labels)
 
