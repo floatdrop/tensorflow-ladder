@@ -19,10 +19,7 @@ def add_unlabeled_split(data_sets, label_count):
   labeled_train_labels = data_sets.train.labels[labeled_indices]
   unlabeled_train_images = data_sets.train.images[unlabeled_indices]
   unlabeled_train_labels = data_sets.train.labels[unlabeled_indices]
-
-  print unlabeled_train_labels
   unlabeled_train_labels.fill(0)
-  print unlabeled_train_labels
 
   labeled_train_images = reshape_to_4d(labeled_train_images)
   unlabeled_train_images = reshape_to_4d(unlabeled_train_images)
