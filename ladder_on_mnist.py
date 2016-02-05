@@ -25,7 +25,7 @@ def add_unlabeled_split(data_sets, label_count):
   unlabeled_train_images = reshape_to_4d(unlabeled_train_images)
 
   data_sets.train_labeled = input_data.DataSet(labeled_train_images, labeled_train_labels)
-  data_sets.train_unlableled = input_data.DataSet(unlabeled_train_images, unlabeled_train_labels)
+  data_sets.train_unlabeled = input_data.DataSet(unlabeled_train_images, unlabeled_train_labels)
 
 
 mnist = input_data.read_data_sets("MNIST_data/", one_hot=True)
@@ -42,6 +42,19 @@ with ladder_network.Session(model) as session:
   for i in range(100):
     for j in range(100):
       images, labels = mnist.train_labeled.next_batch(100)
-      session.train_batch(images, labels, i * 100 + j)
+      session.train_batch(
+        images,
+        labels,
+        step_number = i * 100 + j,
+        is_supervised = True
+      )
+
+      images, null_labels = mnist.train_unlabeled.next_batch(100)
+      session.train_batch(
+        images,
+        null_labels,
+        step_number = i * 100 + j,
+        is_supervised = False
+      )
 
     print session.test(mnist.test.images, mnist.test.labels)

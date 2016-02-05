@@ -1,4 +1,5 @@
 import tensorflow as tf
+from tensorflow.python import control_flow_ops
 from batch_normalization import batch_norm
 from time import strftime
 
@@ -10,6 +11,7 @@ def _build_data_placeholders(input_layer_size, class_count):
   placeholders.inputs = tf.placeholder(tf.float32, [None, input_layer_size], name = 'inputs')
   placeholders.labels = tf.placeholder(tf.float32, [None, class_count], name = 'labels')
   placeholders.is_training_phase = tf.placeholder(tf.bool, name = 'is_training_phase')
+  placeholders.is_supervised = tf.placeholder(tf.bool, name = 'is_supervised')
   return placeholders
 
 def _weight_variable(shape):
@@ -75,16 +77,18 @@ def _build_forward_pass(placeholders):
   return output
 
 def _build_train_step(placeholders, output, learning_rate):
-  cross_entropy = -tf.reduce_mean(placeholders.labels * tf.log(output.label_probabilities))
+  cross_entropy = control_flow_ops.cond(
+    placeholders.is_supervised,
+    lambda: -tf.reduce_mean(placeholders.labels * tf.log(output.label_probabilities)),
+    lambda: tf.constant(0.0)
+  )
+
   autoencoder_cost = tf.reduce_mean(tf.pow(placeholders.inputs - output.autoencoded_inputs, 2))
 
   total_cost = cross_entropy + 0.1 * autoencoder_cost
 
-  summaries = [
-    tf.scalar_summary("total cost", total_cost),
-    tf.scalar_summary("cross entropy", cross_entropy),
-    tf.scalar_summary("autoencoder cost", autoencoder_cost),
-  ]
+  tf.scalar_summary("cross entropy", cross_entropy)
+  tf.scalar_summary("autoencoder cost", autoencoder_cost)
 
   return tf.train.GradientDescentOptimizer(learning_rate).minimize(total_cost)
 
@@ -101,14 +105,13 @@ class Model:
     self.train_step = _build_train_step(self.placeholders, self.output, learning_rate)
     self.accuracy_measure = _build_accuracy_measure(self.placeholders, self.output)
 
-  def fill_placeholders(self, inputs = None, labels = None, is_training_phase = True):
-    replacements = {}
-    if inputs is not None:
-      replacements[self.placeholders.inputs] = inputs
-    if labels is not None:
-      replacements[self.placeholders.labels] = labels
-    replacements[self.placeholders.is_training_phase] = is_training_phase
-    return replacements
+  def fill_placeholders(self, inputs, labels, is_training_phase = True, is_supervised = True):
+    return {
+      self.placeholders.inputs: inputs,
+      self.placeholders.labels: labels,
+      self.placeholders.is_training_phase: is_training_phase,
+      self.placeholders.is_supervised: is_supervised
+    }
 
 class Session:
   def __init__(self, model):
@@ -124,9 +127,17 @@ class Session:
   def __exit__(self, type, value, traceback):
     self.session.close()
 
-  def train_batch(self, inputs, labels, step_number):
-    train_result, summary = self.session.run([self.model.train_step, self.summaries], self.model.fill_placeholders(inputs, labels, is_training_phase = True))
-    self.writer.add_summary(summary, step_number)
+  def train_batch(self, inputs, labels, is_supervised, step_number):
+    train_result, summary = self.session.run(
+      [self.model.train_step, self.summaries],
+      self.model.fill_placeholders(
+        inputs,
+        labels,
+        is_training_phase = True,
+        is_supervised = is_supervised
+    ))
+    if is_supervised:
+      self.writer.add_summary(summary, step_number)
     return train_result
 
   def test(self, inputs, labels):
