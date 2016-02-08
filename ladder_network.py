@@ -72,17 +72,25 @@ def _build_forward_pass(placeholders):
   output.autoencoded_inputs = decoder_outputs[-1]
   return output
 
-def _build_supervised_train_step(placeholders, output, learning_rate):
-  cross_entropy = -tf.reduce_mean(placeholders.labels * tf.log(output.label_probabilities))
-  autoencoder_cost = tf.reduce_mean(tf.pow(placeholders.inputs - output.autoencoded_inputs, 2))
-  total_cost = 3 * cross_entropy + autoencoder_cost
+def _autoencoder_cost(placeholders, output, summary_tag):
+  cost = tf.reduce_mean(tf.pow(placeholders.inputs - output.autoencoded_inputs, 2))
+  tf.scalar_summary("autoencoder cost (%s)" % summary_tag, cost)
+  return cost
+
+def _cost_entropy(placeholders, output):
+  cross_entropy = -tf.reduce_mean(
+    placeholders.labels * tf.log(output.label_probabilities))
   tf.scalar_summary("cross entropy", cross_entropy)
-  tf.scalar_summary("autoencoder cost (supervised)", autoencoder_cost)
+  return cross_entropy
+
+def _build_supervised_train_step(placeholders, output, learning_rate, cross_entropy_training_weight):
+  cross_entropy = _cost_entropy(placeholders, output)
+  autoencoder_cost = _autoencoder_cost(placeholders, output, "supervised")
+  total_cost = cross_entropy_training_weight * cross_entropy + autoencoder_cost
   return tf.train.GradientDescentOptimizer(learning_rate).minimize(total_cost)
 
 def _build_unsupervised_train_step(placeholders, output, learning_rate):
-  autoencoder_cost = tf.reduce_mean(tf.pow(placeholders.inputs - output.autoencoded_inputs, 2))
-  tf.scalar_summary("autoencoder cost", autoencoder_cost)
+  autoencoder_cost = _autoencoder_cost(placeholders, output, "unsupervised")
   return tf.train.GradientDescentOptimizer(learning_rate).minimize(autoencoder_cost)
 
 def _build_accuracy_measure(placeholders, output):
@@ -92,10 +100,12 @@ def _build_accuracy_measure(placeholders, output):
 class Model:
   def __init__(self, input_layer_size, class_count):
     learning_rate = 0.01
+    cross_entropy_training_weight = 3
 
     self.placeholders = _build_data_placeholders(input_layer_size, class_count)
     self.output = _build_forward_pass(self.placeholders)
-    self.supervised_train_step = _build_supervised_train_step(self.placeholders, self.output, learning_rate)
+    self.supervised_train_step = _build_supervised_train_step(
+      self.placeholders, self.output, learning_rate, cross_entropy_training_weight)
     self.unsupervised_train_step = _build_unsupervised_train_step(self.placeholders, self.output, learning_rate)
     self.accuracy_measure = _build_accuracy_measure(self.placeholders, self.output)
 
