@@ -70,12 +70,26 @@ def _build_forward_pass(placeholders):
   output = _Record()
   output.label_probabilities = encoder_outputs[-1]
   output.autoencoded_inputs = decoder_outputs[-1]
+  output.encoder_outputs = encoder_outputs
+  output.decoder_outputs = decoder_outputs
   return output
 
 def _autoencoder_cost(placeholders, output, summary_tag):
-  cost = tf.reduce_mean(tf.pow(placeholders.inputs - output.autoencoded_inputs, 2))
-  tf.scalar_summary("autoencoder cost (%s)" % summary_tag, cost)
-  return cost
+  encoder_outputs = output.encoder_outputs
+  decoder_outputs = list(reversed(output.decoder_outputs))
+
+  assert all(encoder.get_shape().is_compatible_with(decoder.get_shape())
+    for (encoder, decoder) in zip(encoder_outputs, decoder_outputs))
+
+  layer_costs = [tf.reduce_mean(tf.pow(encoder - decoder, 2))
+    for (encoder, decoder) in zip(encoder_outputs, decoder_outputs)]
+
+  for index, layer_cost in enumerate(layer_costs):
+    tf.scalar_summary("layer %i autoencoder cost (%s)" % (index, summary_tag), layer_cost)
+
+  autoencoder_cost = sum(layer_costs)
+  tf.scalar_summary("autoencoder cost (%s)" % summary_tag, autoencoder_cost)
+  return autoencoder_cost
 
 def _cost_entropy(placeholders, output):
   cross_entropy = -tf.reduce_mean(
