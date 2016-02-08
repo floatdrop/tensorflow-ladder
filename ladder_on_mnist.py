@@ -19,4 +19,5 @@ with ladder_network.Session(model) as session:
       session.train_unsupervised_batch(images, step)
 
     if step % 200 == 0:
-      print session.test(mnist.test.images, mnist.test.labels, step)
+      print session.test(
+        mnist.validation.images, mnist.validation.labels, step)
