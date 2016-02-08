@@ -83,15 +83,21 @@ def _cost_entropy(placeholders, output):
   tf.scalar_summary("cross entropy", cross_entropy)
   return cross_entropy
 
-def _build_supervised_train_step(placeholders, output, learning_rate, cross_entropy_training_weight):
+def _total_cost(placeholders, output, cross_entropy_training_weight):
   cross_entropy = _cost_entropy(placeholders, output)
   autoencoder_cost = _autoencoder_cost(placeholders, output, "supervised")
-  total_cost = cross_entropy_training_weight * cross_entropy + autoencoder_cost
-  return tf.train.GradientDescentOptimizer(learning_rate).minimize(total_cost)
+  return cross_entropy_training_weight * cross_entropy + autoencoder_cost
+
+def _optimizer(learning_rate, cost_function):
+  return tf.train.GradientDescentOptimizer(learning_rate).minimize(cost_function)
+
+def _build_supervised_train_step(placeholders, output, learning_rate, cross_entropy_training_weight):
+  total_cost = _total_cost(placeholders, output, cross_entropy_training_weight)
+  return _optimizer(learning_rate, total_cost)
 
 def _build_unsupervised_train_step(placeholders, output, learning_rate):
   autoencoder_cost = _autoencoder_cost(placeholders, output, "unsupervised")
-  return tf.train.GradientDescentOptimizer(learning_rate).minimize(autoencoder_cost)
+  return _optimizer(learning_rate, autoencoder_cost)
 
 def _build_accuracy_measure(placeholders, output):
   correct_prediction = tf.equal(tf.argmax(output.label_probabilities, 1), tf.argmax(placeholders.labels, 1))
