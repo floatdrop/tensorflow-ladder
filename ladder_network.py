@@ -37,8 +37,7 @@ def _build_encoder_layers(input_layer, other_layer_definitions, is_training_phas
       inputs = layer_outputs[-1],
       output_size = layer_size,
       non_linearity = non_linearity,
-      is_training_phase = is_training_phase
-    )
+      is_training_phase = is_training_phase)
     layer_outputs.append(layer_output)
   return layer_outputs
 
@@ -49,8 +48,7 @@ def _build_decoder_layers(encoder_layers, is_training_phase):
       inputs = layer_outputs[-1],
       output_size = _layer_size(encoder_layer),
       non_linearity = tf.nn.relu,
-      is_training_phase = is_training_phase
-    )
+      is_training_phase = is_training_phase)
     layer_outputs.append(layer_output)
   return layer_outputs
 
@@ -63,13 +61,11 @@ def _build_forward_pass(placeholders):
   encoder_outputs = _build_encoder_layers(
     input_layer = placeholders.inputs,
     other_layer_definitions = encoder_layer_definitions,
-    is_training_phase = placeholders.is_training_phase
-  )
+    is_training_phase = placeholders.is_training_phase)
 
   decoder_outputs = _build_decoder_layers(
     encoder_layers = encoder_outputs,
-    is_training_phase = placeholders.is_training_phase
-  )
+    is_training_phase = placeholders.is_training_phase)
 
   output = _Record()
   output.label_probabilities = encoder_outputs[-1]
@@ -79,7 +75,7 @@ def _build_forward_pass(placeholders):
 def _build_supervised_train_step(placeholders, output, learning_rate):
   cross_entropy = -tf.reduce_mean(placeholders.labels * tf.log(output.label_probabilities))
   autoencoder_cost = tf.reduce_mean(tf.pow(placeholders.inputs - output.autoencoded_inputs, 2))
-  total_cost = 10 * cross_entropy + autoencoder_cost
+  total_cost = 3 * cross_entropy + autoencoder_cost
   tf.scalar_summary("cross entropy", cross_entropy)
   tf.scalar_summary("autoencoder cost (supervised)", autoencoder_cost)
   return tf.train.GradientDescentOptimizer(learning_rate).minimize(total_cost)
@@ -130,10 +126,7 @@ class Session:
     train_result, summary = self.session.run(
       [self.model.supervised_train_step, self.summaries],
       self.model.fill_placeholders(
-        inputs,
-        labels,
-        is_training_phase = True
-    ))
+        inputs, labels, is_training_phase = True))
 
     self.writer.add_summary(summary, step_number)
     return train_result
@@ -141,13 +134,11 @@ class Session:
   def train_unsupervised_batch(self, inputs, step_number):
     train_result, summary = self.session.run(
       [self.model.unsupervised_train_step, self.summaries],
-      self.model.fill_placeholders(
-        inputs,
-        is_training_phase = True
-    ))
+      self.model.fill_placeholders(inputs, is_training_phase = True))
 
     self.writer.add_summary(summary, step_number)
     return train_result
 
   def test(self, inputs, labels):
-    return self.session.run(self.model.accuracy_measure, self.model.fill_placeholders(inputs, labels, is_training_phase = False))
+    return self.session.run(self.model.accuracy_measure,
+      self.model.fill_placeholders(inputs, labels, is_training_phase = False))
