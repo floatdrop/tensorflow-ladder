@@ -92,17 +92,17 @@ def _autoencoder_cost(placeholders, output, summary_tag):
       for (encoder, decoder) in zip(encoder_outputs, decoder_outputs)]
 
     for index, layer_cost in enumerate(layer_costs):
-      tf.scalar_summary("layer %i autoencoder cost (%s)" % (index, summary_tag), layer_cost)
+      tf.scalar_summary("layer %i autoencoder cost" % index, layer_cost, [summary_tag])
 
     autoencoder_cost = sum(layer_costs)
-    tf.scalar_summary("autoencoder cost (%s)" % summary_tag, autoencoder_cost)
+    tf.scalar_summary("autoencoder cost", autoencoder_cost, [summary_tag])
     return autoencoder_cost
 
 def _cost_entropy(placeholders, output):
   with tf.name_scope("cross_entropy_cost") as scope:
     cross_entropy = -tf.reduce_mean(
       placeholders.labels * tf.log(output.label_probabilities))
-    tf.scalar_summary("cross entropy", cross_entropy)
+    tf.scalar_summary("cross entropy", cross_entropy, ["supervised"])
     return cross_entropy
 
 def _total_cost(placeholders, output, cross_entropy_training_weight):
@@ -142,6 +142,8 @@ class Model:
       self.placeholders, self.output, learning_rate, cross_entropy_training_weight)
     self.unsupervised_train_step = _build_unsupervised_train_step(self.placeholders, self.output, learning_rate)
     self.accuracy_measure = _build_accuracy_measure(self.placeholders, self.output)
+    self.unsupervised_summaries = tf.merge_all_summaries("unsupervised")
+    self.supervised_summaries = tf.merge_all_summaries("supervised")
 
   def fill_placeholders(self, inputs, labels = None, is_training_phase = True):
     if labels is None:
@@ -156,7 +158,6 @@ class Session:
   def __init__(self, model):
     self.session = tf.Session()
     self.model = model
-    self.summaries = tf.merge_all_summaries()
     self.writer = tf.train.SummaryWriter(
       logdir = strftime("logs/%Y-%m-%d_%H:%M:%S"),
       graph_def = self.session.graph_def)
@@ -170,7 +171,7 @@ class Session:
 
   def train_supervised_batch(self, inputs, labels, step_number):
     train_result, summary = self.session.run(
-      [self.model.supervised_train_step, self.summaries],
+      [self.model.supervised_train_step, self.model.supervised_summaries],
       self.model.fill_placeholders(
         inputs, labels, is_training_phase = True))
 
@@ -179,7 +180,7 @@ class Session:
 
   def train_unsupervised_batch(self, inputs, step_number):
     train_result, summary = self.session.run(
-      [self.model.unsupervised_train_step, self.summaries],
+      [self.model.unsupervised_train_step, self.model.unsupervised_summaries],
       self.model.fill_placeholders(inputs, is_training_phase = True))
 
     self.writer.add_summary(summary, step_number)
