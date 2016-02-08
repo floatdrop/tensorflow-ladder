@@ -3,20 +3,19 @@
 import tensorflow as tf
 from tensorflow.python import control_flow_ops
 
-def batch_norm(inputs, is_training_phase, scope = 'bn'):
+def batch_norm(inputs, is_training_phase):
   """
   Batch normalization for fully connected layers.
   Args:
     inputs:            2D Tensor, batch size * layer width
     is_training_phase: boolean tf.Variable, true indicates training phase
-    scope:             string, variable scope
   Return:
     normed:            batch-normalized map
   """
-  depth = inputs.get_shape()[-1].value
-  inputs_4d = tf.reshape(inputs, [-1, 1, 1, depth])
+  with tf.name_scope('batch_norm') as scope:
+    depth = inputs.get_shape()[-1].value
+    inputs_4d = tf.reshape(inputs, [-1, 1, 1, depth])
 
-  with tf.variable_scope(scope):
     beta = tf.Variable(tf.constant(0.0, shape = [depth]),
       name = 'beta', trainable = True)
     gamma = tf.Variable(tf.constant(1.0, shape = [depth]),
@@ -39,4 +38,4 @@ def batch_norm(inputs, is_training_phase, scope = 'bn'):
       beta, gamma, 1e-3, scale_after_normalization = True)
     normed = tf.reshape(normed_4d, [-1, depth])
 
-  return normed
+    return normed

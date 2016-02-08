@@ -8,49 +8,55 @@ class _Record:
   pass
 
 def _build_data_placeholders(input_layer_size, class_count):
-  placeholders = _Record()
-  placeholders.inputs = tf.placeholder(tf.float32, [None, input_layer_size], name = 'inputs')
-  placeholders.labels = tf.placeholder(tf.float32, [None, class_count], name = 'labels')
-  placeholders.is_training_phase = tf.placeholder(tf.bool, name = 'is_training_phase')
-  return placeholders
+  with tf.name_scope("placeholders") as scope:
+    placeholders = _Record()
+    placeholders.inputs = tf.placeholder(tf.float32, [None, input_layer_size], name = 'inputs')
+    placeholders.labels = tf.placeholder(tf.float32, [None, class_count], name = 'labels')
+    placeholders.is_training_phase = tf.placeholder(tf.bool, name = 'is_training_phase')
+    return placeholders
 
 def _weight_variable(shape):
-  initial = tf.truncated_normal(shape, stddev = 0.1)
-  return tf.Variable(initial)
+  with tf.name_scope("weight") as scope:
+    initial = tf.truncated_normal(shape, stddev = 0.1)
+    return tf.Variable(initial)
 
 def _bias_variable(shape):
-  initial = tf.constant(0.1, shape = shape)
-  return tf.Variable(initial)
+  with tf.name_scope("bias") as scope:
+    initial = tf.constant(0.1, shape = shape)
+    return tf.Variable(initial)
 
 def _layer_size(layer_output):
   return layer_output.get_shape()[1].value
 
 def _fully_connected_layer(inputs, output_size, non_linearity, is_training_phase):
-  weights = _weight_variable([_layer_size(inputs), output_size])
-  linear = batch_norm(tf.matmul(inputs, weights), is_training_phase = is_training_phase)
-  return non_linearity(linear)
+  with tf.name_scope("layer") as scope:
+    weights = _weight_variable([_layer_size(inputs), output_size])
+    linear = batch_norm(tf.matmul(inputs, weights), is_training_phase = is_training_phase)
+    return non_linearity(linear)
 
 def _build_encoder_layers(input_layer, other_layer_definitions, is_training_phase):
-  layer_outputs = [input_layer]
-  for (layer_size, non_linearity) in other_layer_definitions:
-    layer_output = _fully_connected_layer(
-      inputs = layer_outputs[-1],
-      output_size = layer_size,
-      non_linearity = non_linearity,
-      is_training_phase = is_training_phase)
-    layer_outputs.append(layer_output)
-  return layer_outputs
+  with tf.name_scope("encoder") as scope:
+    layer_outputs = [input_layer]
+    for (layer_size, non_linearity) in other_layer_definitions:
+      layer_output = _fully_connected_layer(
+        inputs = layer_outputs[-1],
+        output_size = layer_size,
+        non_linearity = non_linearity,
+        is_training_phase = is_training_phase)
+      layer_outputs.append(layer_output)
+    return layer_outputs
 
 def _build_decoder_layers(encoder_layers, is_training_phase):
-  layer_outputs = [encoder_layers[-1]]
-  for encoder_layer in reversed(encoder_layers[:-1]):
-    layer_output = _fully_connected_layer(
-      inputs = layer_outputs[-1],
-      output_size = _layer_size(encoder_layer),
-      non_linearity = tf.nn.relu,
-      is_training_phase = is_training_phase)
-    layer_outputs.append(layer_output)
-  return layer_outputs
+  with tf.name_scope("decoder") as scope:
+    layer_outputs = [encoder_layers[-1]]
+    for encoder_layer in reversed(encoder_layers[:-1]):
+      layer_output = _fully_connected_layer(
+        inputs = layer_outputs[-1],
+        output_size = _layer_size(encoder_layer),
+        non_linearity = tf.nn.relu,
+        is_training_phase = is_training_phase)
+      layer_outputs.append(layer_output)
+    return layer_outputs
 
 def _build_forward_pass(placeholders):
   encoder_layer_definitions = [
@@ -75,47 +81,55 @@ def _build_forward_pass(placeholders):
   return output
 
 def _autoencoder_cost(placeholders, output, summary_tag):
-  encoder_outputs = output.encoder_outputs
-  decoder_outputs = list(reversed(output.decoder_outputs))
+  with tf.name_scope("autoencoder_cost") as scope:
+    encoder_outputs = output.encoder_outputs
+    decoder_outputs = list(reversed(output.decoder_outputs))
 
-  assert all(encoder.get_shape().is_compatible_with(decoder.get_shape())
-    for (encoder, decoder) in zip(encoder_outputs, decoder_outputs))
+    assert all(encoder.get_shape().is_compatible_with(decoder.get_shape())
+      for (encoder, decoder) in zip(encoder_outputs, decoder_outputs))
 
-  layer_costs = [tf.reduce_mean(tf.pow(encoder - decoder, 2))
-    for (encoder, decoder) in zip(encoder_outputs, decoder_outputs)]
+    layer_costs = [tf.reduce_mean(tf.pow(encoder - decoder, 2))
+      for (encoder, decoder) in zip(encoder_outputs, decoder_outputs)]
 
-  for index, layer_cost in enumerate(layer_costs):
-    tf.scalar_summary("layer %i autoencoder cost (%s)" % (index, summary_tag), layer_cost)
+    for index, layer_cost in enumerate(layer_costs):
+      tf.scalar_summary("layer %i autoencoder cost (%s)" % (index, summary_tag), layer_cost)
 
-  autoencoder_cost = sum(layer_costs)
-  tf.scalar_summary("autoencoder cost (%s)" % summary_tag, autoencoder_cost)
-  return autoencoder_cost
+    autoencoder_cost = sum(layer_costs)
+    tf.scalar_summary("autoencoder cost (%s)" % summary_tag, autoencoder_cost)
+    return autoencoder_cost
 
 def _cost_entropy(placeholders, output):
-  cross_entropy = -tf.reduce_mean(
-    placeholders.labels * tf.log(output.label_probabilities))
-  tf.scalar_summary("cross entropy", cross_entropy)
-  return cross_entropy
+  with tf.name_scope("cross_entropy_cost") as scope:
+    cross_entropy = -tf.reduce_mean(
+      placeholders.labels * tf.log(output.label_probabilities))
+    tf.scalar_summary("cross entropy", cross_entropy)
+    return cross_entropy
 
 def _total_cost(placeholders, output, cross_entropy_training_weight):
-  cross_entropy = _cost_entropy(placeholders, output)
-  autoencoder_cost = _autoencoder_cost(placeholders, output, "supervised")
-  return cross_entropy_training_weight * cross_entropy + autoencoder_cost
+  with tf.name_scope("total_cost") as scope:
+    cross_entropy = _cost_entropy(placeholders, output)
+    autoencoder_cost = _autoencoder_cost(placeholders, output, "supervised")
+    return cross_entropy_training_weight * cross_entropy + autoencoder_cost
 
 def _optimizer(learning_rate, cost_function):
-  return tf.train.GradientDescentOptimizer(learning_rate).minimize(cost_function)
+  with tf.name_scope("optimizer") as scope:
+    optimizer = tf.train.GradientDescentOptimizer(learning_rate)
+    return optimizer.minimize(cost_function)
 
 def _build_supervised_train_step(placeholders, output, learning_rate, cross_entropy_training_weight):
-  total_cost = _total_cost(placeholders, output, cross_entropy_training_weight)
-  return _optimizer(learning_rate, total_cost)
+  with tf.name_scope("supervised_training") as scope:
+    total_cost = _total_cost(placeholders, output, cross_entropy_training_weight)
+    return _optimizer(learning_rate, total_cost)
 
 def _build_unsupervised_train_step(placeholders, output, learning_rate):
-  autoencoder_cost = _autoencoder_cost(placeholders, output, "unsupervised")
-  return _optimizer(learning_rate, autoencoder_cost)
+  with tf.name_scope("unsupervised_training") as scope:
+    autoencoder_cost = _autoencoder_cost(placeholders, output, "unsupervised")
+    return _optimizer(learning_rate, autoencoder_cost)
 
 def _build_accuracy_measure(placeholders, output):
-  correct_prediction = tf.equal(tf.argmax(output.label_probabilities, 1), tf.argmax(placeholders.labels, 1))
-  return tf.reduce_mean(tf.cast(correct_prediction, "float"))
+  with tf.name_scope("accuracy_measure") as scope:
+    correct_prediction = tf.equal(tf.argmax(output.label_probabilities, 1), tf.argmax(placeholders.labels, 1))
+    return tf.reduce_mean(tf.cast(correct_prediction, "float"))
 
 class Model:
   def __init__(self, input_layer_size, class_count):
@@ -143,7 +157,9 @@ class Session:
     self.session = tf.Session()
     self.model = model
     self.summaries = tf.merge_all_summaries()
-    self.writer = tf.train.SummaryWriter(strftime("logs/%Y-%m-%d_%H:%M:%S"))
+    self.writer = tf.train.SummaryWriter(
+      logdir = strftime("logs/%Y-%m-%d_%H:%M:%S"),
+      graph_def = self.session.graph_def)
 
   def __enter__(self):
     self.session.run(tf.initialize_all_variables())
