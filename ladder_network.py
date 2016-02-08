@@ -129,7 +129,9 @@ def _build_unsupervised_train_step(placeholders, output, learning_rate):
 def _build_accuracy_measure(placeholders, output):
   with tf.name_scope("accuracy_measure") as scope:
     correct_prediction = tf.equal(tf.argmax(output.label_probabilities, 1), tf.argmax(placeholders.labels, 1))
-    return tf.reduce_mean(tf.cast(correct_prediction, "float"))
+    accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
+    tf.scalar_summary("test accuracy", accuracy, ["test"])
+    return accuracy
 
 class Model:
   def __init__(self, input_layer_size, class_count):
@@ -142,8 +144,10 @@ class Model:
       self.placeholders, self.output, learning_rate, cross_entropy_training_weight)
     self.unsupervised_train_step = _build_unsupervised_train_step(self.placeholders, self.output, learning_rate)
     self.accuracy_measure = _build_accuracy_measure(self.placeholders, self.output)
+
     self.unsupervised_summaries = tf.merge_all_summaries("unsupervised")
     self.supervised_summaries = tf.merge_all_summaries("supervised")
+    self.test_summaries = tf.merge_all_summaries("test")
 
   def fill_placeholders(self, inputs, labels = None, is_training_phase = True):
     if labels is None:
@@ -186,6 +190,10 @@ class Session:
     self.writer.add_summary(summary, step_number)
     return train_result
 
-  def test(self, inputs, labels):
-    return self.session.run(self.model.accuracy_measure,
+  def test(self, inputs, labels, step_number):
+    accuracy, summary = self.session.run(
+      [self.model.accuracy_measure, self.model.test_summaries],
       self.model.fill_placeholders(inputs, labels, is_training_phase = False))
+
+    self.writer.add_summary(summary, step_number)
+    return accuracy

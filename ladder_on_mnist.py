@@ -10,19 +10,13 @@ model = ladder_network.Model(
 )
 
 with ladder_network.Session(model) as session:
-  for i in range(100):
-    for j in range(100):
+  for step in xrange(10000000):
+    if step % 2 == 0:
       images, labels = mnist.train.next_batch(100)
-      session.train_supervised_batch(
-        images,
-        labels,
-        step_number = 2 * (i * 100 + j)
-      )
-
+      session.train_supervised_batch(images, labels, step)
+    else:
       images, _ = mnist.train_unlabeled.next_batch(100)
-      session.train_unsupervised_batch(
-        images,
-        step_number = 2 * (i * 100 + j) + 1
-      )
+      session.train_unsupervised_batch(images, step)
 
-    print session.test(mnist.test.images, mnist.test.labels)
+    if step % 200 == 0:
+      print session.test(mnist.test.images, mnist.test.labels, step)
