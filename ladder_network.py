@@ -116,16 +116,14 @@ class Model:
 
   def _decoder_layers(self, encoder_layers, is_training_phase):
     with tf.name_scope("decoder") as scope:
-      layer_outputs = [encoder_layers[-1]]
+      decoder_layers = [encoder_layers[-1]]
       for encoder_layer in reversed(encoder_layers[:-1]):
-        layer_output = self._fully_connected_layer(
-            inputs = layer_outputs[-1].post_activation,
-            output_size = self._layer_size(encoder_layer.post_activation),
-            non_linearity = tf.nn.relu,
-            noise_level = 0.0,
+        layer_output = self._decoder_layer(
+            previous_decoder_layer = decoder_layers[-1],
+            encoder_layer = encoder_layer,
             is_training_phase = is_training_phase)
-        layer_outputs.append(layer_output)
-      return layer_outputs
+        decoder_layers.append(layer_output)
+      return decoder_layers
 
   def _fully_connected_layer(self,
       inputs, output_size, non_linearity,
@@ -145,6 +143,23 @@ class Model:
       layer_output.batch_mean = batch_mean
       layer_output.batch_std = batch_std
       return layer_output
+
+  def _decoder_layer(self, previous_decoder_layer, encoder_layer, is_training_phase):
+    with tf.name_scope("decoder_layer") as scope:
+      inputs = previous_decoder_layer.post_activation
+      output_size = self._layer_size(encoder_layer.post_activation)
+      weights = self._weight_variable([self._layer_size(inputs), output_size])
+      pre_normalization = tf.matmul(inputs, weights)
+      pre_activation, batch_mean, batch_std = batch_norm(pre_normalization, is_training_phase = is_training_phase)
+      post_activation = tf.nn.relu(pre_activation)
+
+      layer_output = self._Record()
+      layer_output.pre_normalization = pre_normalization
+      layer_output.pre_activation = pre_activation
+      layer_output.post_activation = post_activation
+      layer_output.batch_mean = batch_mean
+      layer_output.batch_std = batch_std
+      return layer_output    
 
   def _beta_gamma(self, inputs):
     layer_size = self._layer_size(inputs);
