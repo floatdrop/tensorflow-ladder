@@ -133,7 +133,7 @@ class Model:
     with tf.name_scope("layer") as scope:
       weights = self._weight_variable([self._layer_size(inputs), output_size])
       pre_normalization = tf.matmul(inputs, weights)
-      pre_noise = batch_norm(pre_normalization, is_training_phase = is_training_phase)
+      pre_noise, batch_mean, batch_std = batch_norm(pre_normalization, is_training_phase = is_training_phase)
       pre_activation = pre_noise + tf.random_normal([output_size],
           mean = 0.0, stddev = noise_level)
       post_activation = non_linearity(self._beta_gamma(pre_activation))
@@ -142,9 +142,8 @@ class Model:
       layer_output.pre_normalization = pre_normalization
       layer_output.pre_activation = pre_activation
       layer_output.post_activation = post_activation
-      layer_output.batchmean = None
-      layer_output.batchstd = None
-
+      layer_output.batch_mean = batch_mean
+      layer_output.batch_std = batch_std
       return layer_output
 
   def _beta_gamma(self, inputs):

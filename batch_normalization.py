@@ -16,6 +16,7 @@ def batch_norm(inputs, is_training_phase):
     depth = inputs.get_shape()[-1].value
 
     batch_mean, batch_var = tf.nn.moments(inputs, [0], name = 'moments')
+    batch_std = tf.sqrt(batch_var)
     ema = tf.train.ExponentialMovingAverage(decay = 0.9)
     ema_apply_op = ema.apply([batch_mean, batch_var])
     ema_mean, ema_var = ema.average(batch_mean), ema.average(batch_var)
@@ -28,6 +29,6 @@ def batch_norm(inputs, is_training_phase):
       mean_var_with_update,
       lambda: (ema_mean, ema_var))
 
-    normed = (inputs - batch_mean) / batch_var
+    normed = (inputs - batch_mean) / batch_std
 
-    return normed
+    return normed, batch_mean, batch_std
