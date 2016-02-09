@@ -52,20 +52,20 @@ class Model:
       (50, tf.nn.relu),
       (self._layer_size(placeholders.labels), tf.nn.softmax)
     ]
-    encoder_outputs = self._encoder_layers(
+    corrupted_encoder_outputs = self._encoder_layers(
         input_layer = placeholders.inputs,
         other_layer_definitions = encoder_layer_definitions,
         noise_level = self.hyperparameters["noise_level"],
         is_training_phase = placeholders.is_training_phase)
 
     decoder_outputs = self._decoder_layers(
-        encoder_layers = encoder_outputs,
+        encoder_layers = corrupted_encoder_outputs,
         is_training_phase = placeholders.is_training_phase)
 
     output = self._Record()
-    output.label_probabilities = encoder_outputs[-1]
+    output.label_probabilities = corrupted_encoder_outputs[-1]
     output.autoencoded_inputs = decoder_outputs[-1]
-    output.encoder_outputs = encoder_outputs
+    output.corrupted_encoder_outputs = corrupted_encoder_outputs
     output.decoder_outputs = decoder_outputs
     return output
 
@@ -138,14 +138,14 @@ class Model:
 
   def _autoencoder_cost(self, placeholders, output, summary_tag):
     with tf.name_scope("autoencoder_cost") as scope:
-      encoder_outputs = output.encoder_outputs
+      corrupted_encoder_outputs = output.corrupted_encoder_outputs
       decoder_outputs = list(reversed(output.decoder_outputs))
 
       assert all(encoder.get_shape().is_compatible_with(decoder.get_shape())
-        for (encoder, decoder) in zip(encoder_outputs, decoder_outputs))
+        for (encoder, decoder) in zip(corrupted_encoder_outputs, decoder_outputs))
 
       layer_costs = [tf.reduce_mean(tf.pow(encoder - decoder, 2))
-        for (encoder, decoder) in zip(encoder_outputs, decoder_outputs)]
+        for (encoder, decoder) in zip(corrupted_encoder_outputs, decoder_outputs)]
 
       for index, layer_cost in enumerate(layer_costs):
         tf.scalar_summary("layer %i autoencoder cost" % index, layer_cost, [summary_tag])
