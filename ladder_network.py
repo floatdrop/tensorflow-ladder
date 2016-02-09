@@ -6,22 +6,21 @@ from time import strftime
 
 class Model:
   def __init__(self, input_layer_size, class_count):
-    hyperparameters = {
+    self.hyperparameters = {
       "learning_rate": 0.01,
       "cross_entropy_training_weight": 3,
       "noise_level": 0.2
     }
 
     self.placeholders = self._data_placeholders(
-      input_layer_size, class_count)
-    self.output = self._forward_pass(
-      self.placeholders, hyperparameters)
+        input_layer_size, class_count)
+    self.output = self._forward_pass(self.placeholders)
     self.supervised_train_step = self._supervised_train_step(
-      self.placeholders, self.output, hyperparameters)
+        self.placeholders, self.output)
     self.unsupervised_train_step = self._unsupervised_train_step(
-      self.placeholders, self.output, hyperparameters)
+        self.placeholders, self.output)
     self.accuracy_measure = self._accuracy_measure(
-      self.placeholders, self.output)
+        self.placeholders, self.output)
 
     self.unsupervised_summaries = tf.merge_all_summaries("unsupervised")
     self.supervised_summaries = tf.merge_all_summaries("supervised")
@@ -47,31 +46,49 @@ class Model:
       placeholders.is_training_phase = tf.placeholder(tf.bool, name = 'is_training_phase')
       return placeholders
 
-  def _weight_variable(self, shape):
-    with tf.name_scope("weight") as scope:
-      initial = tf.truncated_normal(shape, stddev = 0.1)
-      return tf.Variable(initial)
+  def _forward_pass(self, placeholders):
+    encoder_layer_definitions = [
+      (100, tf.nn.relu),
+      (50, tf.nn.relu),
+      (self._layer_size(placeholders.labels), tf.nn.softmax)
+    ]
+    encoder_outputs = self._encoder_layers(
+        input_layer = placeholders.inputs,
+        other_layer_definitions = encoder_layer_definitions,
+        noise_level = self.hyperparameters["noise_level"],
+        is_training_phase = placeholders.is_training_phase)
 
-  def _bias_variable(self, shape):
-    with tf.name_scope("bias") as scope:
-      initial = tf.constant(0.1, shape = shape)
-      return tf.Variable(initial)
+    decoder_outputs = self._decoder_layers(
+        encoder_layers = encoder_outputs,
+        is_training_phase = placeholders.is_training_phase)
 
-  def _layer_size(self, layer_output):
-    return layer_output.get_shape()[1].value
+    output = self._Record()
+    output.label_probabilities = encoder_outputs[-1]
+    output.autoencoded_inputs = decoder_outputs[-1]
+    output.encoder_outputs = encoder_outputs
+    output.decoder_outputs = decoder_outputs
+    return output
 
-  def _fully_connected_layer(self, 
-      inputs, output_size, non_linearity,
-      noise_level, is_training_phase):
-    with tf.name_scope("layer") as scope:
-      weights = self._weight_variable([self._layer_size(inputs), output_size])
-      linear = batch_norm(tf.matmul(inputs, weights),
-          is_training_phase = is_training_phase)
-      corrupted = linear + tf.random_normal([output_size], mean = 0.0, stddev = noise_level)
-      return non_linearity(linear)
+  def _supervised_train_step(self, placeholders, output):
+    with tf.name_scope("supervised_training") as scope:
+      total_cost = self._total_cost(placeholders, output,
+                self.hyperparameters["cross_entropy_training_weight"])
+      return self._optimizer(self.hyperparameters["learning_rate"], total_cost)
 
-  def _encoder_layers(self, 
-      input_layer, other_layer_definitions,
+  def _unsupervised_train_step(self, placeholders, output):
+    with tf.name_scope("unsupervised_training") as scope:
+      autoencoder_cost = self._autoencoder_cost(placeholders, output, "unsupervised")
+      return self._optimizer(self.hyperparameters["learning_rate"], autoencoder_cost)
+
+  def _accuracy_measure(self, placeholders, output):
+    with tf.name_scope("accuracy_measure") as scope:
+      correct_prediction = tf.equal(tf.argmax(output.label_probabilities, 1), tf.argmax(placeholders.labels, 1))
+      accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
+      tf.scalar_summary("test accuracy", accuracy, ["test"])
+      return accuracy
+
+  def _encoder_layers(self,
+        input_layer, other_layer_definitions,
       noise_level, is_training_phase):
     with tf.name_scope("encoder") as scope:
       layer_outputs = [input_layer]
@@ -98,28 +115,26 @@ class Model:
         layer_outputs.append(layer_output)
       return layer_outputs
 
-  def _forward_pass(self, placeholders, hyperparameters):
-    encoder_layer_definitions = [
-      (100, tf.nn.relu),
-      (50, tf.nn.relu),
-      (self._layer_size(placeholders.labels), tf.nn.softmax)
-    ]
-    encoder_outputs = self._encoder_layers(
-        input_layer = placeholders.inputs,
-        other_layer_definitions = encoder_layer_definitions,
-        noise_level = hyperparameters["noise_level"],
-        is_training_phase = placeholders.is_training_phase)
+  def _fully_connected_layer(self,
+        inputs, output_size, non_linearity,
+      noise_level, is_training_phase):
+    with tf.name_scope("layer") as scope:
+      weights = self._weight_variable([self._layer_size(inputs), output_size])
+      linear = batch_norm(tf.matmul(inputs, weights),
+          is_training_phase = is_training_phase)
+      corrupted = linear + tf.random_normal([output_size], mean = 0.0, stddev = noise_level)
+      return non_linearity(linear)
 
-    decoder_outputs = self._decoder_layers(
-        encoder_layers = encoder_outputs,
-        is_training_phase = placeholders.is_training_phase)
+  def _optimizer(self, learning_rate, cost_function):
+    with tf.name_scope("optimizer") as scope:
+      optimizer = tf.train.GradientDescentOptimizer(learning_rate)
+      return optimizer.minimize(cost_function)
 
-    output = self._Record()
-    output.label_probabilities = encoder_outputs[-1]
-    output.autoencoded_inputs = decoder_outputs[-1]
-    output.encoder_outputs = encoder_outputs
-    output.decoder_outputs = decoder_outputs
-    return output
+  def _total_cost(self, placeholders, output, cross_entropy_training_weight):
+    with tf.name_scope("total_cost") as scope:
+      cross_entropy = self._cost_entropy(placeholders, output)
+      autoencoder_cost = self._autoencoder_cost(placeholders, output, "supervised")
+      return cross_entropy_training_weight * cross_entropy + autoencoder_cost
 
   def _autoencoder_cost(self, placeholders, output, summary_tag):
     with tf.name_scope("autoencoder_cost") as scope:
@@ -146,34 +161,18 @@ class Model:
       tf.scalar_summary("cross entropy", cross_entropy, ["supervised"])
       return cross_entropy
 
-  def _total_cost(self, placeholders, output, cross_entropy_training_weight):
-    with tf.name_scope("total_cost") as scope:
-      cross_entropy = self._cost_entropy(placeholders, output)
-      autoencoder_cost = self._autoencoder_cost(placeholders, output, "supervised")
-      return cross_entropy_training_weight * cross_entropy + autoencoder_cost
+  def _weight_variable(self, shape):
+    with tf.name_scope("weight") as scope:
+      initial = tf.truncated_normal(shape, stddev = 0.1)
+      return tf.Variable(initial)
 
-  def _optimizer(self, learning_rate, cost_function):
-    with tf.name_scope("optimizer") as scope:
-      optimizer = tf.train.GradientDescentOptimizer(learning_rate)
-      return optimizer.minimize(cost_function)
+  def _bias_variable(self, shape):
+    with tf.name_scope("bias") as scope:
+      initial = tf.constant(0.1, shape = shape)
+      return tf.Variable(initial)
 
-  def _supervised_train_step(self, placeholders, output, hyperparameters):
-    with tf.name_scope("supervised_training") as scope:
-      total_cost = self._total_cost(placeholders, output, 
-          hyperparameters["cross_entropy_training_weight"])
-      return self._optimizer(hyperparameters["learning_rate"], total_cost)
-
-  def _unsupervised_train_step(self, placeholders, output, hyperparameters):
-    with tf.name_scope("unsupervised_training") as scope:
-      autoencoder_cost = self._autoencoder_cost(placeholders, output, "unsupervised")
-      return self._optimizer(hyperparameters["learning_rate"], autoencoder_cost)
-
-  def _accuracy_measure(self, placeholders, output):
-    with tf.name_scope("accuracy_measure") as scope:
-      correct_prediction = tf.equal(tf.argmax(output.label_probabilities, 1), tf.argmax(placeholders.labels, 1))
-      accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
-      tf.scalar_summary("test accuracy", accuracy, ["test"])
-      return accuracy
+  def _layer_size(self, layer_output):
+    return layer_output.get_shape()[1].value
 
 
 class Session:
