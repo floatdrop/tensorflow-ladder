@@ -88,7 +88,7 @@ class Model:
       return accuracy
 
   def _encoder_layers(self,
-        input_layer, other_layer_definitions,
+      input_layer, other_layer_definitions,
       noise_level, is_training_phase):
     with tf.name_scope("encoder") as scope:
       layer_outputs = [input_layer]
