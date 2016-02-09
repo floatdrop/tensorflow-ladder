@@ -127,7 +127,7 @@ class Model:
 
   def _optimizer(self, learning_rate, cost_function):
     with tf.name_scope("optimizer") as scope:
-      optimizer = tf.train.GradientDescentOptimizer(learning_rate)
+      optimizer = tf.train.AdamOptimizer(learning_rate)
       return optimizer.minimize(cost_function)
 
   def _total_cost(self, placeholders, output, cross_entropy_training_weight):
