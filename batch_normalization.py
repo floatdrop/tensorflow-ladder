@@ -10,18 +10,12 @@ def batch_norm(inputs, is_training_phase):
     inputs:            2D Tensor, batch size * layer width
     is_training_phase: boolean tf.Variable, true indicates training phase
   Return:
-    normed:            batch-normalized map
+    normed:            batch-normalized Tensor
   """
   with tf.name_scope('batch_norm') as scope:
     depth = inputs.get_shape()[-1].value
-    inputs_4d = tf.reshape(inputs, [-1, 1, 1, depth])
 
-    beta = tf.Variable(tf.constant(0.0, shape = [depth]),
-      name = 'beta', trainable = True)
-    gamma = tf.Variable(tf.constant(1.0, shape = [depth]),
-      name = 'gamma', trainable = True)
-
-    batch_mean, batch_var = tf.nn.moments(inputs_4d, [0, 1, 2], name = 'moments')
+    batch_mean, batch_var = tf.nn.moments(inputs, [0], name = 'moments')
     ema = tf.train.ExponentialMovingAverage(decay = 0.9)
     ema_apply_op = ema.apply([batch_mean, batch_var])
     ema_mean, ema_var = ema.average(batch_mean), ema.average(batch_var)
@@ -34,8 +28,6 @@ def batch_norm(inputs, is_training_phase):
       mean_var_with_update,
       lambda: (ema_mean, ema_var))
 
-    normed_4d = tf.nn.batch_norm_with_global_normalization(inputs_4d, mean, var,
-      beta, gamma, 1e-3, scale_after_normalization = True)
-    normed = tf.reshape(normed_4d, [-1, depth])
+    normed = (inputs - batch_mean) / batch_var
 
     return normed

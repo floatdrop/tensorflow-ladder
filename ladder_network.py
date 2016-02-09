@@ -7,8 +7,8 @@ from time import strftime
 class Model:
   def __init__(self, input_layer_size, class_count):
     self.hyperparameters = {
-      "learning_rate": 0.01,
-      "cross_entropy_training_weight": 3,
+      "learning_rate": 0.001,
+      "cross_entropy_training_weight": 100,
       "noise_level": 0.2
     }
 
@@ -134,8 +134,9 @@ class Model:
       weights = self._weight_variable([self._layer_size(inputs), output_size])
       pre_normalization = tf.matmul(inputs, weights)
       pre_noise = batch_norm(pre_normalization, is_training_phase = is_training_phase)
-      pre_activation = pre_noise + tf.random_normal([output_size], mean = 0.0, stddev = noise_level)
-      post_activation = non_linearity(pre_activation)
+      pre_activation = pre_noise + tf.random_normal([output_size],
+          mean = 0.0, stddev = noise_level)
+      post_activation = non_linearity(self._beta_gamma(pre_activation))
 
       layer_output = self._Record()
       layer_output.pre_normalization = pre_normalization
@@ -145,6 +146,15 @@ class Model:
       layer_output.batchstd = None
 
       return layer_output
+
+  def _beta_gamma(self, inputs):
+    layer_size = self._layer_size(inputs);
+    beta = tf.Variable(tf.constant(0.0,
+        shape = [layer_size]), name = 'beta', trainable = True)
+    gamma = tf.Variable(tf.constant(1.0,
+        shape = [layer_size]), name = 'gamma', trainable = True)
+    return gamma * (inputs + beta)
+
 
   def _optimizer(self, learning_rate, cost_function):
     with tf.name_scope("optimizer") as scope:
