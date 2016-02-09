@@ -72,7 +72,7 @@ class Model:
   def _supervised_train_step(self, placeholders, output):
     with tf.name_scope("supervised_training") as scope:
       total_cost = self._total_cost(placeholders, output,
-                self.hyperparameters["cross_entropy_training_weight"])
+          self.hyperparameters["cross_entropy_training_weight"])
       return self._optimizer(self.hyperparameters["learning_rate"], total_cost)
 
   def _unsupervised_train_step(self, placeholders, output):
@@ -116,7 +116,7 @@ class Model:
       return layer_outputs
 
   def _fully_connected_layer(self,
-        inputs, output_size, non_linearity,
+      inputs, output_size, non_linearity,
       noise_level, is_training_phase):
     with tf.name_scope("layer") as scope:
       weights = self._weight_variable([self._layer_size(inputs), output_size])
@@ -180,8 +180,8 @@ class Session:
     self.session = tf.Session()
     self.model = model
     self.writer = tf.train.SummaryWriter(
-      logdir = strftime("logs/%Y-%m-%d_%H:%M:%S"),
-      graph_def = self.session.graph_def)
+        logdir = strftime("logs/%Y-%m-%d_%H:%M:%S"),
+        graph_def = self.session.graph_def)
 
   def __enter__(self):
     self.session.run(tf.initialize_all_variables())
