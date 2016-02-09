@@ -52,6 +52,12 @@ class Model:
       (50, tf.nn.relu),
       (self._layer_size(placeholders.labels), tf.nn.softmax)
     ]
+    clean_encoder_outputs = self._encoder_layers(
+        input_layer = placeholders.inputs,
+        other_layer_definitions = encoder_layer_definitions,
+        noise_level = 0.0,
+        is_training_phase = placeholders.is_training_phase)
+
     corrupted_encoder_outputs = self._encoder_layers(
         input_layer = placeholders.inputs,
         other_layer_definitions = encoder_layer_definitions,
@@ -63,8 +69,10 @@ class Model:
         is_training_phase = placeholders.is_training_phase)
 
     output = self._Record()
-    output.label_probabilities = corrupted_encoder_outputs[-1]
+    output.clean_label_probabilities = clean_encoder_outputs[-1]
+    output.corrupted_label_probabilities = corrupted_encoder_outputs[-1]
     output.autoencoded_inputs = decoder_outputs[-1]
+    output.clean_encoder_outputs = clean_encoder_outputs
     output.corrupted_encoder_outputs = corrupted_encoder_outputs
     output.decoder_outputs = decoder_outputs
     return output
@@ -82,7 +90,7 @@ class Model:
 
   def _accuracy_measure(self, placeholders, output):
     with tf.name_scope("accuracy_measure") as scope:
-      correct_prediction = tf.equal(tf.argmax(output.label_probabilities, 1), tf.argmax(placeholders.labels, 1))
+      correct_prediction = tf.equal(tf.argmax(output.clean_label_probabilities, 1), tf.argmax(placeholders.labels, 1))
       accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
       tf.scalar_summary("test accuracy", accuracy, ["test"])
       return accuracy
@@ -138,14 +146,14 @@ class Model:
 
   def _autoencoder_cost(self, placeholders, output, summary_tag):
     with tf.name_scope("autoencoder_cost") as scope:
-      corrupted_encoder_outputs = output.corrupted_encoder_outputs
+      clean_encoder_outputs = output.clean_encoder_outputs
       decoder_outputs = list(reversed(output.decoder_outputs))
 
       assert all(encoder.get_shape().is_compatible_with(decoder.get_shape())
-        for (encoder, decoder) in zip(corrupted_encoder_outputs, decoder_outputs))
+        for (encoder, decoder) in zip(clean_encoder_outputs, decoder_outputs))
 
       layer_costs = [tf.reduce_mean(tf.pow(encoder - decoder, 2))
-        for (encoder, decoder) in zip(corrupted_encoder_outputs, decoder_outputs)]
+        for (encoder, decoder) in zip(clean_encoder_outputs, decoder_outputs)]
 
       for index, layer_cost in enumerate(layer_costs):
         tf.scalar_summary("layer %i autoencoder cost" % index, layer_cost, [summary_tag])
@@ -157,7 +165,7 @@ class Model:
   def _cost_entropy(self, placeholders, output):
     with tf.name_scope("cross_entropy_cost") as scope:
       cross_entropy = -tf.reduce_mean(
-          placeholders.labels * tf.log(output.label_probabilities))
+          placeholders.labels * tf.log(output.corrupted_label_probabilities))
       tf.scalar_summary("cross entropy", cross_entropy, ["supervised"])
       return cross_entropy
 
