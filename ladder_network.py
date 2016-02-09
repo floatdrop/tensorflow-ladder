@@ -69,8 +69,8 @@ class Model:
         is_training_phase = placeholders.is_training_phase)
 
     output = self._Record()
-    output.clean_label_probabilities = clean_encoder_outputs[-1]
-    output.corrupted_label_probabilities = corrupted_encoder_outputs[-1]
+    output.clean_label_probabilities = clean_encoder_outputs[-1].post_activation
+    output.corrupted_label_probabilities = corrupted_encoder_outputs[-1].post_activation
     output.autoencoded_inputs = decoder_outputs[-1]
     output.clean_encoder_outputs = clean_encoder_outputs
     output.corrupted_encoder_outputs = corrupted_encoder_outputs
@@ -99,14 +99,18 @@ class Model:
       input_layer, other_layer_definitions,
       noise_level, is_training_phase):
     with tf.name_scope("encoder") as scope:
-      layer_outputs = [input_layer]
+      input_layer_holder = self._Record()
+      input_layer_holder.post_activation = input_layer
+      input_layer_holder.pre_activation = input_layer
+      layer_outputs = [input_layer_holder]
       for (layer_size, non_linearity) in other_layer_definitions:
         layer_output = self._fully_connected_layer(
-            inputs = layer_outputs[-1],
+            inputs = layer_outputs[-1].post_activation,
             output_size = layer_size,
             non_linearity = non_linearity,
             noise_level = noise_level,
             is_training_phase = is_training_phase)
+
         layer_outputs.append(layer_output)
       return layer_outputs
 
@@ -115,8 +119,8 @@ class Model:
       layer_outputs = [encoder_layers[-1]]
       for encoder_layer in reversed(encoder_layers[:-1]):
         layer_output = self._fully_connected_layer(
-            inputs = layer_outputs[-1],
-            output_size = self._layer_size(encoder_layer),
+            inputs = layer_outputs[-1].post_activation,
+            output_size = self._layer_size(encoder_layer.post_activation),
             non_linearity = tf.nn.relu,
             noise_level = 0.0,
             is_training_phase = is_training_phase)
@@ -128,10 +132,19 @@ class Model:
       noise_level, is_training_phase):
     with tf.name_scope("layer") as scope:
       weights = self._weight_variable([self._layer_size(inputs), output_size])
-      linear = batch_norm(tf.matmul(inputs, weights),
-          is_training_phase = is_training_phase)
-      corrupted = linear + tf.random_normal([output_size], mean = 0.0, stddev = noise_level)
-      return non_linearity(linear)
+      pre_normalization = tf.matmul(inputs, weights)
+      pre_noise = batch_norm(pre_normalization, is_training_phase = is_training_phase)
+      pre_activation = pre_noise + tf.random_normal([output_size], mean = 0.0, stddev = noise_level)
+      post_activation = non_linearity(pre_activation)
+
+      layer_output = self._Record()
+      layer_output.pre_normalization = pre_normalization
+      layer_output.pre_activation = pre_activation
+      layer_output.post_activation = post_activation
+      layer_output.batchmean = None
+      layer_output.batchstd = None
+
+      return layer_output
 
   def _optimizer(self, learning_rate, cost_function):
     with tf.name_scope("optimizer") as scope:
@@ -146,8 +159,10 @@ class Model:
 
   def _autoencoder_cost(self, placeholders, output, summary_tag):
     with tf.name_scope("autoencoder_cost") as scope:
-      clean_encoder_outputs = output.clean_encoder_outputs
-      decoder_outputs = list(reversed(output.decoder_outputs))
+      clean_encoder_outputs = [encoder.pre_activation
+        for encoder in output.clean_encoder_outputs]
+      decoder_outputs = [decoder.pre_activation
+        for decoder in list(reversed(output.decoder_outputs))]
 
       assert all(encoder.get_shape().is_compatible_with(decoder.get_shape())
         for (encoder, decoder) in zip(clean_encoder_outputs, decoder_outputs))
