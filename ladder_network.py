@@ -28,21 +28,28 @@ def _bias_variable(shape):
 def _layer_size(layer_output):
   return layer_output.get_shape()[1].value
 
-def _fully_connected_layer(inputs, output_size, non_linearity, is_training_phase):
+def _fully_connected_layer(
+    inputs, output_size, non_linearity,
+    noise_level, is_training_phase):
   with tf.name_scope("layer") as scope:
     weights = _weight_variable([_layer_size(inputs), output_size])
-    linear = batch_norm(tf.matmul(inputs, weights), is_training_phase = is_training_phase)
+    linear = batch_norm(tf.matmul(inputs, weights),
+        is_training_phase = is_training_phase)
+    corrupted = linear + tf.random_normal([output_size], mean = 0.0, stddev = noise_level)
     return non_linearity(linear)
 
-def _build_encoder_layers(input_layer, other_layer_definitions, is_training_phase):
+def _build_encoder_layers(
+    input_layer, other_layer_definitions,
+    noise_level, is_training_phase):
   with tf.name_scope("encoder") as scope:
     layer_outputs = [input_layer]
     for (layer_size, non_linearity) in other_layer_definitions:
       layer_output = _fully_connected_layer(
-        inputs = layer_outputs[-1],
-        output_size = layer_size,
-        non_linearity = non_linearity,
-        is_training_phase = is_training_phase)
+          inputs = layer_outputs[-1],
+          output_size = layer_size,
+          non_linearity = non_linearity,
+          noise_level = noise_level,
+          is_training_phase = is_training_phase)
       layer_outputs.append(layer_output)
     return layer_outputs
 
@@ -54,11 +61,12 @@ def _build_decoder_layers(encoder_layers, is_training_phase):
         inputs = layer_outputs[-1],
         output_size = _layer_size(encoder_layer),
         non_linearity = tf.nn.relu,
+        noise_level = 0.0,
         is_training_phase = is_training_phase)
       layer_outputs.append(layer_output)
     return layer_outputs
 
-def _build_forward_pass(placeholders):
+def _build_forward_pass(placeholders, hyperparameters):
   encoder_layer_definitions = [
     (100, tf.nn.relu),
     (50, tf.nn.relu),
@@ -67,6 +75,7 @@ def _build_forward_pass(placeholders):
   encoder_outputs = _build_encoder_layers(
     input_layer = placeholders.inputs,
     other_layer_definitions = encoder_layer_definitions,
+    noise_level = hyperparameters["noise_level"],
     is_training_phase = placeholders.is_training_phase)
 
   decoder_outputs = _build_decoder_layers(
@@ -116,15 +125,16 @@ def _optimizer(learning_rate, cost_function):
     optimizer = tf.train.GradientDescentOptimizer(learning_rate)
     return optimizer.minimize(cost_function)
 
-def _build_supervised_train_step(placeholders, output, learning_rate, cross_entropy_training_weight):
+def _build_supervised_train_step(placeholders, output, hyperparameters):
   with tf.name_scope("supervised_training") as scope:
-    total_cost = _total_cost(placeholders, output, cross_entropy_training_weight)
-    return _optimizer(learning_rate, total_cost)
+    total_cost = _total_cost(placeholders, output, 
+      hyperparameters["cross_entropy_training_weight"])
+    return _optimizer(hyperparameters["learning_rate"], total_cost)
 
-def _build_unsupervised_train_step(placeholders, output, learning_rate):
+def _build_unsupervised_train_step(placeholders, output, hyperparameters):
   with tf.name_scope("unsupervised_training") as scope:
     autoencoder_cost = _autoencoder_cost(placeholders, output, "unsupervised")
-    return _optimizer(learning_rate, autoencoder_cost)
+    return _optimizer(hyperparameters["learning_rate"], autoencoder_cost)
 
 def _build_accuracy_measure(placeholders, output):
   with tf.name_scope("accuracy_measure") as scope:
@@ -135,15 +145,22 @@ def _build_accuracy_measure(placeholders, output):
 
 class Model:
   def __init__(self, input_layer_size, class_count):
-    learning_rate = 0.01
-    cross_entropy_training_weight = 3
+    hyperparameters = {
+      "learning_rate": 0.01,
+      "cross_entropy_training_weight": 3,
+      "noise_level": 0.2
+    }
 
-    self.placeholders = _build_data_placeholders(input_layer_size, class_count)
-    self.output = _build_forward_pass(self.placeholders)
+    self.placeholders = _build_data_placeholders(
+      input_layer_size, class_count)
+    self.output = _build_forward_pass(
+      self.placeholders, hyperparameters)
     self.supervised_train_step = _build_supervised_train_step(
-      self.placeholders, self.output, learning_rate, cross_entropy_training_weight)
-    self.unsupervised_train_step = _build_unsupervised_train_step(self.placeholders, self.output, learning_rate)
-    self.accuracy_measure = _build_accuracy_measure(self.placeholders, self.output)
+      self.placeholders, self.output, hyperparameters)
+    self.unsupervised_train_step = _build_unsupervised_train_step(
+      self.placeholders, self.output, hyperparameters)
+    self.accuracy_measure = _build_accuracy_measure(
+      self.placeholders, self.output)
 
     self.unsupervised_summaries = tf.merge_all_summaries("unsupervised")
     self.supervised_summaries = tf.merge_all_summaries("supervised")
