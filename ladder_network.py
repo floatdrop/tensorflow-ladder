@@ -65,10 +65,10 @@ class Model:
         (class_count, tf.nn.softmax)
       ],
       "denoising_cost_multipliers": [
-        10, # input layer
+        1000, # input layer
+        0.5,
         0.1,
-        0.001,
-        0.001 # output layer
+        0.1 # output layer
       ]
     }
 
@@ -103,9 +103,14 @@ class Model:
 
   def _unsupervised_train_step(self, placeholders, output):
     with tf.name_scope("unsupervised_training") as scope:
-      denoising_cost = self._total_denoising_cost(
-          placeholders, output, ["unsupervised"])
-      return self._optimizer(self.hyperparameters["learning_rate"], denoising_cost, ["unsupervised"])
+      summary_tags = ["unsupervised"]
+      total_denoising_cost, layer_denoising_costs = self._total_denoising_cost(
+        placeholders, output)
+      tf.scalar_summary("total denoising cost", total_denoising_cost, summary_tags)
+      for index, layer_cost in enumerate(layer_denoising_costs):
+        tf.scalar_summary("layer %i denoising cost" % index, layer_cost, summary_tags)
+      return self._optimizer(
+          self.hyperparameters["learning_rate"], total_denoising_cost, summary_tags)
 
   def _optimizer(self, learning_rate, cost_function, summary_tags):
     with tf.name_scope("optimizer") as scope:
@@ -119,20 +124,38 @@ class Model:
   def _total_cost(self, placeholders, output):
     with tf.name_scope("total_cost") as scope:
       cross_entropy = self._cross_entropy(placeholders, output)
-      denoising_cost = self._total_denoising_cost(
-          placeholders, output, ["supervised"])
-      total_cost = cross_entropy + denoising_cost
-      tf.scalar_summary("total cost", total_cost, ["supervised"])
+      total_denoising_cost, layer_denoising_costs = self._total_denoising_cost(
+          placeholders, output)
+      total_cost = cross_entropy + total_denoising_cost
+
+      self._log_all_costs(total_cost, cross_entropy, total_denoising_cost,
+        layer_denoising_costs, ["supervised"])
+
       return total_cost
+
+  def _log_all_costs(self, total_cost = None, cross_entropy = None,
+        total_denoising_cost = None, layer_denoising_costs = None,
+        summary_tags = tf.GraphKeys.SUMMARIES):
+      tf.scalar_summary("total cost", total_cost, summary_tags)
+
+      tf.scalar_summary("cross entropy", cross_entropy, summary_tags)
+      tf.scalar_summary("cross entropy %", 100 * cross_entropy / total_cost, summary_tags)
+
+      tf.scalar_summary("total denoising cost", total_denoising_cost, summary_tags)
+      tf.scalar_summary("total denoising cost %%", 100 * total_denoising_cost / total_cost, summary_tags)
+
+      for index, layer_cost in enumerate(layer_denoising_costs):
+        tf.scalar_summary("layer %i denoising cost" % index, layer_cost, summary_tags)
+        tf.scalar_summary("layer %i denoising cost %%" % index, 100 * layer_cost / total_cost, summary_tags)
+
 
   def _cross_entropy(self, placeholders, output):
     with tf.name_scope("cross_entropy_cost") as scope:
       cross_entropy = -tf.reduce_mean(
           placeholders.labels * tf.log(output.corrupted_label_probabilities))
-      tf.scalar_summary("cross entropy", cross_entropy, ["supervised"])
       return cross_entropy
 
-  def _total_denoising_cost(self, placeholders, output, summary_tags):
+  def _total_denoising_cost(self, placeholders, output):
     with tf.name_scope("denoising_cost") as scope:
       denoising_cost_multipliers = self.hyperparameters["denoising_cost_multipliers"]
       layer_costs = [self._layer_denoising_cost(*params) for params in zip(
@@ -141,11 +164,7 @@ class Model:
           denoising_cost_multipliers)]
       total_denoising_cost = sum(layer_costs)
 
-      for index, layer_cost in enumerate(layer_costs):
-        tf.scalar_summary("layer %i denoising cost" % index, layer_cost, summary_tags)
-      tf.scalar_summary("total denoising cost", total_denoising_cost, summary_tags)
-
-      return total_denoising_cost
+      return total_denoising_cost, layer_costs
 
   def _layer_denoising_cost(self, encoder, decoder, cost_multiplier):
     return cost_multiplier * self._mean_squared_error(

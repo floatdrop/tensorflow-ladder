@@ -8,7 +8,7 @@ model = ladder_network.Model(input_layer_size = 784, class_count = 10)
 
 with ladder_network.Session(model) as session:
   for step in xrange(10000000):
-    if step % 2 == 0:
+    if step % 5 == 0:
       images, labels = mnist.train.next_batch(100)
       session.train_supervised_batch(images, labels, step)
     else:
