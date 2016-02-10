@@ -122,7 +122,7 @@ class Model:
       denoising_cost = self._total_denoising_cost(
           placeholders, output, ["supervised"])
       total_cost = cross_entropy + denoising_cost
-      tf.scalar_summary("total cost", cross_entropy, ["supervised"])
+      tf.scalar_summary("total cost", total_cost, ["supervised"])
       return total_cost
 
   def _cross_entropy(self, placeholders, output):
