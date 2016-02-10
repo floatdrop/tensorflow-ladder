@@ -177,15 +177,15 @@ class _ForwardPass:
       clean_encoder_outputs = self._encoder_layers(
           input_layer = placeholders.inputs,
           other_layer_definitions = encoder_layer_definitions,
-          noise_level = 0.0,
           is_training_phase = placeholders.is_training_phase)
 
     with tf.name_scope("corrupted_encoder") as scope:
       corrupted_encoder_outputs = self._encoder_layers(
           input_layer = placeholders.inputs,
           other_layer_definitions = encoder_layer_definitions,
+          is_training_phase = placeholders.is_training_phase,
           noise_level = hyperparameters["noise_level"],
-          is_training_phase = placeholders.is_training_phase)
+          reuse_variables = clean_encoder_outputs[1:])
 
     with tf.name_scope("decoder") as scope:
       decoder_outputs = self._decoder_layers(
@@ -200,20 +200,22 @@ class _ForwardPass:
     self.corrupted_encoder_outputs = corrupted_encoder_outputs
     self.decoder_outputs = decoder_outputs
 
-  def _encoder_layers(self,
-      input_layer, other_layer_definitions,
-      noise_level, is_training_phase):
+  def _encoder_layers(self, input_layer, other_layer_definitions,
+      noise_level = None, is_training_phase = True, reuse_variables = None):
     first_encoder_layer = _InputLayerWrapper(input_layer)
+    if reuse_variables is None:
+      reuse_variables = [None for layer in other_layer_definitions]
 
     layer_accumulator = [first_encoder_layer]
-    for (layer_size, non_linearity) in other_layer_definitions:
+    for ((layer_size, non_linearity), reuse_layer) in zip(
+        other_layer_definitions, reuse_variables):
       layer_output = _EncoderLayer(
           inputs = layer_accumulator[-1].post_activation,
           output_size = layer_size,
           non_linearity = non_linearity,
           noise_level = noise_level,
-          is_training_phase = is_training_phase)
-
+          is_training_phase = is_training_phase,
+          reuse_variables = reuse_layer)
       layer_accumulator.append(layer_output)
     return layer_accumulator
 
@@ -241,23 +243,34 @@ class _InputLayerWrapper:
 
 
 class _EncoderLayer:
-  def __init__(self,
-      inputs, output_size, non_linearity,
-      noise_level, is_training_phase):
+  def __init__(self, inputs, output_size, non_linearity,
+      noise_level, is_training_phase, reuse_variables = None):
     with tf.name_scope("encoder_layer") as scope:
-      weights = _weight_variable([_layer_size(inputs), output_size])
-      self.pre_normalization = tf.matmul(inputs, weights)
+      self._create_or_reuse_variables(reuse_variables, _layer_size(inputs), output_size)
+
+      self.pre_normalization = tf.matmul(inputs, self.weights)
       pre_noise, self.batch_mean, self.batch_std = batch_norm(
           self.pre_normalization, is_training_phase = is_training_phase)
-      self.pre_activation = pre_noise + tf.random_normal(
-          [output_size], mean = 0.0, stddev = noise_level)
-      self.post_activation = non_linearity(self._beta_gamma(self.pre_activation))
+      self.pre_activation = self._add_noise(pre_noise, noise_level)
+      beta_gamma = self.gamma * (self.pre_activation + self.beta)
+      self.post_activation = non_linearity(beta_gamma)
 
-  def _beta_gamma(self, inputs):
-    layer_size = _layer_size(inputs);
-    beta = tf.Variable(tf.constant(0.0, shape = [layer_size]), name = 'beta')
-    gamma = tf.Variable(tf.constant(1.0, shape = [layer_size]), name = 'gamma')
-    return gamma * (inputs + beta)
+  def _create_or_reuse_variables(self, variables, input_size, output_size):
+    if variables is None:
+      self.weights = _weight_variable([input_size, output_size])
+      self.beta = tf.Variable(tf.constant(0.0, shape = [output_size]), name = 'beta')
+      self.gamma = tf.Variable(tf.constant(1.0, shape = [output_size]), name = 'gamma')
+    else:
+      self.weights = variables.weights
+      self.beta = variables.beta
+      self.gamma = variables.gamma
+
+  def _add_noise(self, tensor, noise_level):
+    if noise_level is None:
+      return tensor
+    else:
+      return tensor + tf.random_normal(
+          [_layer_size(tensor)], mean = 0.0, stddev = noise_level)
 
 
 class _DecoderLayer:
@@ -295,9 +308,8 @@ class _DecoderLayer:
 
 
 def _weight_variable(shape):
-  with tf.name_scope("weight") as scope:
-    initial = tf.truncated_normal(shape, stddev = 0.1)
-    return tf.Variable(initial)
+  initial = tf.truncated_normal(shape, stddev = 0.1)
+  return tf.Variable(initial, name="weight")
 
 def _layer_size(layer_output):
   return layer_output.get_shape()[-1].value
