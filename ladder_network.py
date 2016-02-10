@@ -65,7 +65,8 @@ class Model:
         is_training_phase = placeholders.is_training_phase)
 
     decoder_outputs = self._decoder_layers(
-        encoder_layers = corrupted_encoder_outputs,
+        clean_encoder_layers = clean_encoder_outputs,
+        corrupted_encoder_layers = corrupted_encoder_outputs,
         is_training_phase = placeholders.is_training_phase)
 
     output = self._Record()
@@ -102,6 +103,9 @@ class Model:
       input_layer_holder = self._Record()
       input_layer_holder.post_activation = input_layer
       input_layer_holder.pre_activation = input_layer
+      input_layer_holder.batch_mean = 0.0 # ???
+      input_layer_holder.batch_std = 1.0 # ???
+
       layer_outputs = [input_layer_holder]
       for (layer_size, non_linearity) in other_layer_definitions:
         layer_output = self._fully_connected_layer(
@@ -114,13 +118,16 @@ class Model:
         layer_outputs.append(layer_output)
       return layer_outputs
 
-  def _decoder_layers(self, encoder_layers, is_training_phase):
+  def _decoder_layers(self, clean_encoder_layers, corrupted_encoder_layers,
+        is_training_phase):
     with tf.name_scope("decoder") as scope:
-      decoder_layers = [encoder_layers[-1]]
-      for encoder_layer in reversed(encoder_layers[:-1]):
+      decoder_layers = [corrupted_encoder_layers[-1]]
+      encoder_layers = zip(clean_encoder_layers, corrupted_encoder_layers)[:-1]
+      for clean, corrupted in reversed(encoder_layers):
         layer_output = self._decoder_layer(
             previous_decoder_layer = decoder_layers[-1],
-            encoder_layer = encoder_layer,
+            clean_encoder_layer = clean,
+            corrupted_encoder_layer = corrupted,
             is_training_phase = is_training_phase)
         decoder_layers.append(layer_output)
       return decoder_layers
@@ -144,21 +151,24 @@ class Model:
       layer_output.batch_std = batch_std
       return layer_output
 
-  def _decoder_layer(self, previous_decoder_layer, encoder_layer, is_training_phase):
+  def _decoder_layer(self,
+      previous_decoder_layer, clean_encoder_layer, corrupted_encoder_layer,
+      is_training_phase):
     with tf.name_scope("decoder_layer") as scope:
       inputs = previous_decoder_layer.post_activation
-      output_size = self._layer_size(encoder_layer.post_activation)
+      output_size = self._layer_size(clean_encoder_layer.post_activation)
       weights = self._weight_variable([self._layer_size(inputs), output_size])
-      pre_normalization = tf.matmul(inputs, weights)
-      pre_activation, batch_mean, batch_std = batch_norm(pre_normalization, is_training_phase = is_training_phase)
+      pre_1st_normalization = tf.matmul(inputs, weights)
+      pre_activation, _, _ = batch_norm(pre_1st_normalization, is_training_phase = is_training_phase)
       post_activation = tf.nn.relu(pre_activation)
 
+      post_2nd_normalization = \
+        (post_activation - clean_encoder_layer.batch_mean) / clean_encoder_layer.batch_std
+
       layer_output = self._Record()
-      layer_output.pre_normalization = pre_normalization
       layer_output.pre_activation = pre_activation
       layer_output.post_activation = post_activation
-      layer_output.batch_mean = batch_mean
-      layer_output.batch_std = batch_std
+      layer_output.post_2nd_normalization = post_2nd_normalization
       return layer_output    
 
   def _beta_gamma(self, inputs):
