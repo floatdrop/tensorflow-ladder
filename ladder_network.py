@@ -104,22 +104,16 @@ class Model:
 
   def _autoencoder_cost(self, placeholders, output, summary_tag):
     with tf.name_scope("autoencoder_cost") as scope:
-      clean_encoder_outputs = [encoder.pre_activation
-        for encoder in output.clean_encoder_outputs]
-      decoder_outputs = [decoder.post_2nd_normalization
-        for decoder in list(reversed(output.decoder_outputs))]
-
-      assert all(encoder.get_shape().is_compatible_with(decoder.get_shape())
-        for (encoder, decoder) in zip(clean_encoder_outputs, decoder_outputs))
-
-      layer_costs = [tf.reduce_mean(tf.pow(encoder - decoder, 2))
-        for (encoder, decoder) in zip(clean_encoder_outputs, decoder_outputs)]
+      layer_costs = [self._mean_squared_error(
+          encoder.pre_activation, decoder.post_2nd_normalization)
+        for (encoder, decoder)
+        in zip(output.clean_encoder_outputs, reversed(output.decoder_outputs))]
+      autoencoder_cost = sum(layer_costs)
 
       for index, layer_cost in enumerate(layer_costs):
         tf.scalar_summary("layer %i autoencoder cost" % index, layer_cost, [summary_tag])
+      tf.scalar_summary("total autoencoder cost", autoencoder_cost, [summary_tag])
 
-      autoencoder_cost = sum(layer_costs)
-      tf.scalar_summary("autoencoder cost", autoencoder_cost, [summary_tag])
       return autoencoder_cost
 
   def _cost_entropy(self, placeholders, output):
@@ -129,6 +123,8 @@ class Model:
       tf.scalar_summary("cross entropy", cross_entropy, ["supervised"])
       return cross_entropy
 
+  def _mean_squared_error(self, expected, actual):
+    return tf.reduce_mean(tf.pow(expected - actual, 2))
 
 class _Placeholders:
   def __init__(self, input_layer_size, class_count):
