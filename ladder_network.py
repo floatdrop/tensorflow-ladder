@@ -55,13 +55,18 @@ class Session:
 class Model:
   def __init__(self, input_layer_size, class_count):
     self.hyperparameters = {
-      "learning_rate": 0.003,
+      "learning_rate": 0.1,
       "noise_level": 0.2,
-      "denoising_cost_multiplier": 0.00001,
       "encoder_layer_definitions": [
-        (100, tf.nn.relu),
+        (100, tf.nn.relu), # first hidden layer
         (50, tf.nn.relu),
         (class_count, tf.nn.softmax)
+      ],
+      "denoising_cost_multipliers": [
+        0, # input layer
+        0,
+        0,
+        0 # output layer
       ]
     }
 
@@ -80,34 +85,40 @@ class Model:
 
   def _accuracy_measure(self, placeholders, output):
     with tf.name_scope("accuracy_measure") as scope:
-      correct_prediction = tf.equal(tf.argmax(output.clean_label_probabilities, 1), tf.argmax(placeholders.labels, 1))
+      actual_labels = tf.argmax(output.clean_label_probabilities, 1)
+      expected_labels = tf.argmax(placeholders.labels, 1)
+
+      correct_prediction = tf.equal(actual_labels, expected_labels)
       accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
+      tf.histogram_summary("class distribution", actual_labels, ["test"])
       tf.scalar_summary("test accuracy", accuracy, ["test"])
       return accuracy
 
   def _supervised_train_step(self, placeholders, output):
     with tf.name_scope("supervised_training") as scope:
-      total_cost = self._total_cost(placeholders, output,
-          self.hyperparameters["denoising_cost_multiplier"])
-      return self._optimizer(self.hyperparameters["learning_rate"], total_cost)
+      total_cost = self._total_cost(placeholders, output)
+      return self._optimizer(self.hyperparameters["learning_rate"], total_cost, ["supervised"])
 
   def _unsupervised_train_step(self, placeholders, output):
     with tf.name_scope("unsupervised_training") as scope:
       denoising_cost = self._total_denoising_cost(
-          placeholders, output,
-          self.hyperparameters["denoising_cost_multiplier"], ["unsupervised"])
-      return self._optimizer(self.hyperparameters["learning_rate"], denoising_cost)
+          placeholders, output, ["unsupervised"])
+      return self._optimizer(self.hyperparameters["learning_rate"], denoising_cost, ["unsupervised"])
 
-  def _optimizer(self, learning_rate, cost_function):
+  def _optimizer(self, learning_rate, cost_function, summary_tags):
     with tf.name_scope("optimizer") as scope:
       optimizer = tf.train.AdamOptimizer(learning_rate)
-      return optimizer.minimize(cost_function)
+      gradients_and_vars = optimizer.compute_gradients(cost_function)
+      for (gradient, var) in gradients_and_vars:
+        if gradient is not None:
+          tf.histogram_summary("gradient for %s" % var.name, gradient, summary_tags)
+      return optimizer.apply_gradients(gradients_and_vars)
 
-  def _total_cost(self, placeholders, output, denoising_cost_multiplier):
+  def _total_cost(self, placeholders, output):
     with tf.name_scope("total_cost") as scope:
       cross_entropy = self._cross_entropy(placeholders, output)
       denoising_cost = self._total_denoising_cost(
-          placeholders, output, denoising_cost_multiplier, ["supervised"])
+          placeholders, output, ["supervised"])
       total_cost = cross_entropy + denoising_cost
       tf.scalar_summary("total cost", cross_entropy, ["supervised"])
       return total_cost
@@ -119,22 +130,24 @@ class Model:
       tf.scalar_summary("cross entropy", cross_entropy, ["supervised"])
       return cross_entropy
 
-  def _total_denoising_cost(self, placeholders, output, cost_multiplier, summary_tags):
+  def _total_denoising_cost(self, placeholders, output, summary_tags):
     with tf.name_scope("denoising_cost") as scope:
-      layer_costs = [self._layer_denoising_cost(encoder, decoder, cost_multiplier)
-        for (encoder, decoder)
-        in zip(output.clean_encoder_outputs, reversed(output.decoder_outputs))]
-      denoising_cost = sum(layer_costs)
+      denoising_cost_multipliers = self.hyperparameters["denoising_cost_multipliers"]
+      layer_costs = [self._layer_denoising_cost(*params) for params in zip(
+          output.clean_encoder_outputs,
+          reversed(output.decoder_outputs),
+          denoising_cost_multipliers)]
+      total_denoising_cost = sum(layer_costs)
 
       for index, layer_cost in enumerate(layer_costs):
         tf.scalar_summary("layer %i denoising cost" % index, layer_cost, summary_tags)
-      tf.scalar_summary("total denoising cost", denoising_cost, summary_tags)
+      tf.scalar_summary("total denoising cost", total_denoising_cost, summary_tags)
 
-      return denoising_cost
+      return total_denoising_cost
 
   def _layer_denoising_cost(self, encoder, decoder, cost_multiplier):
-    return self._mean_squared_error(
-      encoder.pre_activation, decoder.post_2nd_normalization) * cost_multiplier
+    return cost_multiplier * self._mean_squared_error(
+        encoder.pre_activation, decoder.post_2nd_normalization)
 
   def _mean_squared_error(self, expected, actual):
     return tf.reduce_mean(tf.pow(expected - actual, 2))
@@ -159,22 +172,26 @@ class _Placeholders:
 class _ForwardPass:
   def __init__(self, placeholders, hyperparameters):
     encoder_layer_definitions = hyperparameters["encoder_layer_definitions"]
-    clean_encoder_outputs = self._encoder_layers(
-        input_layer = placeholders.inputs,
-        other_layer_definitions = encoder_layer_definitions,
-        noise_level = 0.0,
-        is_training_phase = placeholders.is_training_phase)
 
-    corrupted_encoder_outputs = self._encoder_layers(
-        input_layer = placeholders.inputs,
-        other_layer_definitions = encoder_layer_definitions,
-        noise_level = hyperparameters["noise_level"],
-        is_training_phase = placeholders.is_training_phase)
+    with tf.name_scope("clean_encoder") as scope:
+      clean_encoder_outputs = self._encoder_layers(
+          input_layer = placeholders.inputs,
+          other_layer_definitions = encoder_layer_definitions,
+          noise_level = 0.0,
+          is_training_phase = placeholders.is_training_phase)
 
-    decoder_outputs = self._decoder_layers(
-        clean_encoder_layers = clean_encoder_outputs,
-        corrupted_encoder_layers = corrupted_encoder_outputs,
-        is_training_phase = placeholders.is_training_phase)
+    with tf.name_scope("corrupted_encoder") as scope:
+      corrupted_encoder_outputs = self._encoder_layers(
+          input_layer = placeholders.inputs,
+          other_layer_definitions = encoder_layer_definitions,
+          noise_level = hyperparameters["noise_level"],
+          is_training_phase = placeholders.is_training_phase)
+
+    with tf.name_scope("decoder") as scope:
+      decoder_outputs = self._decoder_layers(
+          clean_encoder_layers = clean_encoder_outputs,
+          corrupted_encoder_layers = corrupted_encoder_outputs,
+          is_training_phase = placeholders.is_training_phase)
 
     self.clean_label_probabilities = clean_encoder_outputs[-1].post_activation
     self.corrupted_label_probabilities = corrupted_encoder_outputs[-1].post_activation
@@ -186,35 +203,33 @@ class _ForwardPass:
   def _encoder_layers(self,
       input_layer, other_layer_definitions,
       noise_level, is_training_phase):
-    with tf.name_scope("encoder") as scope:
-      first_encoder_layer = _InputLayerWrapper(input_layer)
+    first_encoder_layer = _InputLayerWrapper(input_layer)
 
-      layer_accumulator = [first_encoder_layer]
-      for (layer_size, non_linearity) in other_layer_definitions:
-        layer_output = _EncoderLayer(
-            inputs = layer_accumulator[-1].post_activation,
-            output_size = layer_size,
-            non_linearity = non_linearity,
-            noise_level = noise_level,
-            is_training_phase = is_training_phase)
+    layer_accumulator = [first_encoder_layer]
+    for (layer_size, non_linearity) in other_layer_definitions:
+      layer_output = _EncoderLayer(
+          inputs = layer_accumulator[-1].post_activation,
+          output_size = layer_size,
+          non_linearity = non_linearity,
+          noise_level = noise_level,
+          is_training_phase = is_training_phase)
 
-        layer_accumulator.append(layer_output)
-      return layer_accumulator
+      layer_accumulator.append(layer_output)
+    return layer_accumulator
 
   def _decoder_layers(self, clean_encoder_layers, corrupted_encoder_layers,
         is_training_phase):
     # FIXME: Actually the first decoder layer shold get the correct label from above
-    with tf.name_scope("decoder") as scope:
-      encoder_layers = reversed(zip(clean_encoder_layers, corrupted_encoder_layers))
-      layer_accumulator = [None]
-      for clean_layer, corrupted_layer in encoder_layers:
-        layer = _DecoderLayer(
-            clean_encoder_layer = clean_layer,
-            corrupted_encoder_layer = corrupted_layer,
-            previous_decoder_layer = layer_accumulator[-1],
-            is_training_phase = is_training_phase)
-        layer_accumulator.append(layer)
-      return layer_accumulator[1:]
+    encoder_layers = reversed(zip(clean_encoder_layers, corrupted_encoder_layers))
+    layer_accumulator = [None]
+    for clean_layer, corrupted_layer in encoder_layers:
+      layer = _DecoderLayer(
+          clean_encoder_layer = clean_layer,
+          corrupted_encoder_layer = corrupted_layer,
+          previous_decoder_layer = layer_accumulator[-1],
+          is_training_phase = is_training_phase)
+      layer_accumulator.append(layer)
+    return layer_accumulator[1:]
 
 
 class _InputLayerWrapper:
@@ -240,10 +255,8 @@ class _EncoderLayer:
 
   def _beta_gamma(self, inputs):
     layer_size = _layer_size(inputs);
-    beta = tf.Variable(tf.constant(0.0,
-        shape = [layer_size]), name = 'beta', trainable = True)
-    gamma = tf.Variable(tf.constant(1.0,
-        shape = [layer_size]), name = 'gamma', trainable = True)
+    beta = tf.Variable(tf.constant(0.0, shape = [layer_size]), name = 'beta')
+    gamma = tf.Variable(tf.constant(1.0, shape = [layer_size]), name = 'gamma')
     return gamma * (inputs + beta)
 
 
