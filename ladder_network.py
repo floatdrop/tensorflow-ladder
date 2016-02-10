@@ -55,7 +55,7 @@ class Session:
 class Model:
   def __init__(self, input_layer_size, class_count):
     self.hyperparameters = {
-      "learning_rate": 0.001,
+      "learning_rate": 0.01,
       "cross_entropy_training_weight": 100,
       "noise_level": 0.2
     }
@@ -199,27 +199,16 @@ class _ForwardPass:
   def _decoder_layers(self, clean_encoder_layers, corrupted_encoder_layers,
         is_training_phase):
     with tf.name_scope("decoder") as scope:
-      last_corrupted_encoder_layer = corrupted_encoder_layers[-1]
-      last_clean_encoder_layer = clean_encoder_layers[-1]
-      rest_of_encoder_layers = zip(clean_encoder_layers, corrupted_encoder_layers)[:-1]
-
-      first_decoder_layer = _DecoderLayer(
-          previous_decoder_layer = last_corrupted_encoder_layer,
-          corrupted_encoder_layer = last_corrupted_encoder_layer,
-          clean_encoder_layer = last_clean_encoder_layer,
-          is_training_phase = is_training_phase,
-          is_first_decoder = True
-      )
-
-      layer_accumulator = [first_decoder_layer]
-      for clean_layer, corrupted_layer in reversed(rest_of_encoder_layers):
+      encoder_layers = reversed(zip(clean_encoder_layers, corrupted_encoder_layers))
+      layer_accumulator = [None]
+      for clean_layer, corrupted_layer in encoder_layers:
         layer = _DecoderLayer(
-            previous_decoder_layer = layer_accumulator[-1],
             clean_encoder_layer = clean_layer,
             corrupted_encoder_layer = corrupted_layer,
+            previous_decoder_layer = layer_accumulator[-1],
             is_training_phase = is_training_phase)
         layer_accumulator.append(layer)
-      return layer_accumulator
+      return layer_accumulator[1:]
 
 
 class _InputLayerWrapper:
@@ -254,27 +243,25 @@ class _EncoderLayer:
 
 class _DecoderLayer:
   def __init__(self,
-      previous_decoder_layer, clean_encoder_layer, corrupted_encoder_layer,
-      is_training_phase, is_first_decoder = False):
+      clean_encoder_layer, corrupted_encoder_layer,
+      previous_decoder_layer = None, is_training_phase = True):
     with tf.name_scope("decoder_layer") as scope:
-      input_size = _layer_size(previous_decoder_layer.post_activation)
-      output_size = _layer_size(clean_encoder_layer.post_activation)
-
-      if is_first_decoder:
-        pre_1st_normalization = previous_decoder_layer.post_activation
+      is_first_decoder_layer = previous_decoder_layer is None
+      if is_first_decoder_layer:
+        pre_1st_normalization = corrupted_encoder_layer.post_activation
       else:
+        input_size = _layer_size(previous_decoder_layer.post_denoising)
+        output_size = _layer_size(clean_encoder_layer.post_activation)
         weights = _weight_variable([input_size, output_size])
         pre_1st_normalization = tf.matmul(
-          previous_decoder_layer.post_activation, weights)
+          previous_decoder_layer.post_denoising, weights)
 
-      pre_activation, _, _ = batch_norm(pre_1st_normalization, is_training_phase = is_training_phase)
-      post_activation = tf.nn.relu(pre_activation)
-
+      pre_denoising, _, _ = batch_norm(pre_1st_normalization, is_training_phase = is_training_phase)
+      post_denoising = tf.nn.relu(pre_denoising)
       post_2nd_normalization = \
-        (post_activation - clean_encoder_layer.batch_mean) / clean_encoder_layer.batch_std
+        (post_denoising - clean_encoder_layer.batch_mean) / clean_encoder_layer.batch_std
 
-      self.pre_activation = pre_activation
-      self.post_activation = post_activation
+      self.post_denoising = post_denoising
       self.post_2nd_normalization = post_2nd_normalization
 
 
