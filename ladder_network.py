@@ -65,10 +65,10 @@ class Model:
         (class_count, tf.nn.softmax)
       ],
       "denoising_cost_multipliers": [
-        0, # input layer
-        0,
-        0,
-        0 # output layer
+        10, # input layer
+        0.1,
+        0.001,
+        0.001 # output layer
       ]
     }
 
