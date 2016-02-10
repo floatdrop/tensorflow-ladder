@@ -56,8 +56,8 @@ class Model:
   def __init__(self, input_layer_size, class_count):
     self.hyperparameters = {
       "learning_rate": 0.003,
-      "cross_entropy_training_weight": 10000,
-      "noise_level": 0.2
+      "noise_level": 0.2,
+      "denoising_cost_multiplier": 0.00001
     }
 
     self.placeholders = _Placeholders(input_layer_size, class_count)
@@ -83,45 +83,53 @@ class Model:
   def _supervised_train_step(self, placeholders, output):
     with tf.name_scope("supervised_training") as scope:
       total_cost = self._total_cost(placeholders, output,
-          self.hyperparameters["cross_entropy_training_weight"])
+          self.hyperparameters["denoising_cost_multiplier"])
       return self._optimizer(self.hyperparameters["learning_rate"], total_cost)
 
   def _unsupervised_train_step(self, placeholders, output):
     with tf.name_scope("unsupervised_training") as scope:
-      autoencoder_cost = self._autoencoder_cost(placeholders, output, "unsupervised")
-      return self._optimizer(self.hyperparameters["learning_rate"], autoencoder_cost)
+      denoising_cost = self._total_denoising_cost(
+          placeholders, output,
+          self.hyperparameters["denoising_cost_multiplier"], ["unsupervised"])
+      return self._optimizer(self.hyperparameters["learning_rate"], denoising_cost)
 
   def _optimizer(self, learning_rate, cost_function):
     with tf.name_scope("optimizer") as scope:
       optimizer = tf.train.AdamOptimizer(learning_rate)
       return optimizer.minimize(cost_function)
 
-  def _total_cost(self, placeholders, output, cross_entropy_training_weight):
+  def _total_cost(self, placeholders, output, denoising_cost_multiplier):
     with tf.name_scope("total_cost") as scope:
-      cross_entropy = self._cost_entropy(placeholders, output)
-      autoencoder_cost = self._autoencoder_cost(placeholders, output, "supervised")
-      return cross_entropy_training_weight * cross_entropy + autoencoder_cost
+      cross_entropy = self._cross_entropy(placeholders, output)
+      denoising_cost = self._total_denoising_cost(
+          placeholders, output, denoising_cost_multiplier, ["supervised"])
+      total_cost = cross_entropy + denoising_cost
+      tf.scalar_summary("total cost", cross_entropy, ["supervised"])
+      return total_cost
 
-  def _autoencoder_cost(self, placeholders, output, summary_tag):
-    with tf.name_scope("autoencoder_cost") as scope:
-      layer_costs = [self._mean_squared_error(
-          encoder.pre_activation, decoder.post_2nd_normalization)
-        for (encoder, decoder)
-        in zip(output.clean_encoder_outputs, reversed(output.decoder_outputs))]
-      autoencoder_cost = sum(layer_costs)
-
-      for index, layer_cost in enumerate(layer_costs):
-        tf.scalar_summary("layer %i autoencoder cost" % index, layer_cost, [summary_tag])
-      tf.scalar_summary("total autoencoder cost", autoencoder_cost, [summary_tag])
-
-      return autoencoder_cost
-
-  def _cost_entropy(self, placeholders, output):
+  def _cross_entropy(self, placeholders, output):
     with tf.name_scope("cross_entropy_cost") as scope:
       cross_entropy = -tf.reduce_mean(
           placeholders.labels * tf.log(output.corrupted_label_probabilities))
       tf.scalar_summary("cross entropy", cross_entropy, ["supervised"])
       return cross_entropy
+
+  def _total_denoising_cost(self, placeholders, output, cost_multiplier, summary_tags):
+    with tf.name_scope("denoising_cost") as scope:
+      layer_costs = [self._layer_denoising_cost(encoder, decoder, cost_multiplier)
+        for (encoder, decoder)
+        in zip(output.clean_encoder_outputs, reversed(output.decoder_outputs))]
+      denoising_cost = sum(layer_costs)
+
+      for index, layer_cost in enumerate(layer_costs):
+        tf.scalar_summary("layer %i denoising cost" % index, layer_cost, summary_tags)
+      tf.scalar_summary("total denoising cost", denoising_cost, summary_tags)
+
+      return denoising_cost
+
+  def _layer_denoising_cost(self, encoder, decoder, cost_multiplier):
+    return self._mean_squared_error(
+      encoder.pre_activation, decoder.post_2nd_normalization) * cost_multiplier
 
   def _mean_squared_error(self, expected, actual):
     return tf.reduce_mean(tf.pow(expected - actual, 2))
