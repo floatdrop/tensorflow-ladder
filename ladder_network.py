@@ -57,7 +57,7 @@ class Session:
 class Model:
   def __init__(self, input_layer_size, class_count):
     self.hyperparameters = {
-      "learning_rate": 0.1,
+      "learning_rate": 0.01,
       "noise_level": 0.2,
       "encoder_layer_definitions": [
         (100, tf.nn.relu), # first hidden layer
@@ -142,7 +142,7 @@ class Model:
       tf.scalar_summary("cross entropy %", 100 * cross_entropy / total_cost, summary_tags)
 
       tf.scalar_summary("total denoising cost", total_denoising_cost, summary_tags)
-      tf.scalar_summary("total denoising cost %%", 100 * total_denoising_cost / total_cost, summary_tags)
+      tf.scalar_summary("total denoising cost %", 100 * total_denoising_cost / total_cost, summary_tags)
 
       for index, layer_cost in enumerate(layer_denoising_costs):
         tf.scalar_summary("layer %i denoising cost" % index, layer_cost, summary_tags)
@@ -278,7 +278,7 @@ class _EncoderLayer:
 
   def _create_or_reuse_variables(self, variables, input_size, output_size):
     if variables is None:
-      self.weights = _weight_variable([input_size, output_size])
+      self.weights = _weight_variable([input_size, output_size], name = 'W')
       self.beta = tf.Variable(tf.constant(0.0, shape = [output_size]), name = 'beta')
       self.gamma = tf.Variable(tf.constant(1.0, shape = [output_size]), name = 'gamma')
     else:
@@ -305,7 +305,7 @@ class _DecoderLayer:
       else:
         input_size = _layer_size(previous_decoder_layer.post_denoising)
         output_size = _layer_size(clean_encoder_layer.post_activation)
-        weights = _weight_variable([input_size, output_size])
+        weights = _weight_variable([input_size, output_size], name = 'V')
         pre_1st_normalization = tf.matmul(
           previous_decoder_layer.post_denoising, weights)
 
@@ -319,18 +319,20 @@ class _DecoderLayer:
       self.post_2nd_normalization = post_2nd_normalization
 
   def _denoise(self, from_left, from_above):
-    mu = self._modulate(from_above)
-    v = self._modulate(from_above)
+    with tf.name_scope('mu') as scope:
+      mu = self._modulate(from_above)
+    with tf.name_scope('v') as scope:
+      v = self._modulate(from_above)
     return (from_left - mu) * v + mu
 
   def _modulate(self, u):
-    a = [_weight_variable([_layer_size(u)]) for i in xrange(5)]
+    a = [_weight_variable([_layer_size(u)], name = str(i)) for i in xrange(5)]
     return a[0] * tf.nn.sigmoid(a[1] * u + a[2]) + a[3] * u + a[4]
 
 
-def _weight_variable(shape):
+def _weight_variable(shape, name = 'weight'):
   initial = tf.truncated_normal(shape, stddev = 0.1)
-  return tf.Variable(initial, name="weight")
+  return tf.Variable(initial, name = name)
 
 def _layer_size(layer_output):
   return layer_output.get_shape()[-1].value
