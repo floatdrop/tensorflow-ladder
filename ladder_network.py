@@ -55,8 +55,8 @@ class Session:
 class Model:
   def __init__(self, input_layer_size, class_count):
     self.hyperparameters = {
-      "learning_rate": 0.01,
-      "cross_entropy_training_weight": 100,
+      "learning_rate": 0.003,
+      "cross_entropy_training_weight": 10000,
       "noise_level": 0.2
     }
 
@@ -194,6 +194,7 @@ class _ForwardPass:
 
   def _decoder_layers(self, clean_encoder_layers, corrupted_encoder_layers,
         is_training_phase):
+    # FIXME: Actually the first decoder layer shold get the correct label from above
     with tf.name_scope("decoder") as scope:
       encoder_layers = reversed(zip(clean_encoder_layers, corrupted_encoder_layers))
       layer_accumulator = [None]
@@ -253,12 +254,22 @@ class _DecoderLayer:
           previous_decoder_layer.post_denoising, weights)
 
       pre_denoising, _, _ = batch_norm(pre_1st_normalization, is_training_phase = is_training_phase)
-      post_denoising = tf.nn.relu(pre_denoising)
+      post_denoising = self._denoise(
+        corrupted_encoder_layer.pre_activation, pre_denoising)
       post_2nd_normalization = \
         (post_denoising - clean_encoder_layer.batch_mean) / clean_encoder_layer.batch_std
 
       self.post_denoising = post_denoising
       self.post_2nd_normalization = post_2nd_normalization
+
+  def _denoise(self, from_left, from_above):
+    mu = self._modulate(from_above)
+    v = self._modulate(from_above)
+    return (from_left - mu) * v + mu
+
+  def _modulate(self, u):
+    a = [_weight_variable([_layer_size(u)]) for i in xrange(5)]
+    return a[0] * tf.nn.sigmoid(a[1] * u + a[2]) + a[3] * u + a[4]
 
 
 def _weight_variable(shape):
