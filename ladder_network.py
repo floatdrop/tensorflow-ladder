@@ -36,12 +36,14 @@ class Session:
         is_training_phase = True)
 
   def test(self, inputs, labels, step_number):
-    return self._run(self.model.accuracy_measure,
+    result = self._run(self.model.accuracy_measure,
         summary_action = self.model.test_summaries,
         step_number = step_number,
         inputs = inputs,
         labels = labels,
         is_training_phase = False)
+    self.writer.flush()
+    return result
 
   def _run(self, action, summary_action, step_number, inputs, labels = None, is_training_phase = True):
     variable_placements = self.model.placeholders.placements(
