@@ -5,7 +5,6 @@ from batch_normalization import batch_norm
 from time import strftime
 
 
-
 class Session:
   def __init__(self, model):
     self.session = tf.Session()
@@ -22,29 +21,35 @@ class Session:
     self.session.close()
 
   def train_supervised_batch(self, inputs, labels, step_number):
-    train_result, summary = self.session.run(
-      [self.model.supervised_train_step, self.model.supervised_summaries],
-      self.model.fill_placeholders(
-          inputs, labels, is_training_phase = True))
-
-    self.writer.add_summary(summary, step_number)
-    return train_result
+    return self._run(self.model.supervised_train_step,
+        summary_action = self.model.supervised_summaries,
+        step_number = step_number,
+        inputs = inputs,
+        labels = labels,
+        is_training_phase = True)
 
   def train_unsupervised_batch(self, inputs, step_number):
-    train_result, summary = self.session.run(
-        [self.model.unsupervised_train_step, self.model.unsupervised_summaries],
-        self.model.fill_placeholders(inputs, is_training_phase = True))
-
-    self.writer.add_summary(summary, step_number)
-    return train_result
+    return self._run(self.model.unsupervised_train_step,
+        summary_action = self.model.unsupervised_summaries,
+        step_number = step_number,
+        inputs = inputs,
+        is_training_phase = True)
 
   def test(self, inputs, labels, step_number):
-    accuracy, summary = self.session.run(
-        [self.model.accuracy_measure, self.model.test_summaries],
-        self.model.fill_placeholders(inputs, labels, is_training_phase = False))
+    return self._run(self.model.accuracy_measure,
+        summary_action = self.model.test_summaries,
+        step_number = step_number,
+        inputs = inputs,
+        labels = labels,
+        is_training_phase = False)
 
+  def _run(self, action, summary_action, step_number, inputs, labels = None, is_training_phase = True):
+    variable_placements = self.model.placeholders.placements(
+        inputs, labels, is_training_phase)
+    action_result, summary = self.session.run(
+        [action, summary_action], variable_placements)
     self.writer.add_summary(summary, step_number)
-    return accuracy
+    return action_result
 
 
 class Model:
@@ -55,36 +60,25 @@ class Model:
       "noise_level": 0.2
     }
 
-    self.placeholders = self._data_placeholders(
-        input_layer_size, class_count)
+    self.placeholders = _Placeholders(input_layer_size, class_count)
     self.output = _ForwardPass(self.placeholders, self.hyperparameters)
+    self.accuracy_measure = self._accuracy_measure(
+        self.placeholders, self.output)
     self.supervised_train_step = self._supervised_train_step(
         self.placeholders, self.output)
     self.unsupervised_train_step = self._unsupervised_train_step(
-        self.placeholders, self.output)
-    self.accuracy_measure = self._accuracy_measure(
         self.placeholders, self.output)
 
     self.unsupervised_summaries = tf.merge_all_summaries("unsupervised")
     self.supervised_summaries = tf.merge_all_summaries("supervised")
     self.test_summaries = tf.merge_all_summaries("test")
 
-  def fill_placeholders(self, inputs, labels = None, is_training_phase = True):
-    if labels is None:
-      labels = numpy.zeros([inputs.shape[0], _layer_size(self.placeholders.labels)])
-    return {
-      self.placeholders.inputs: inputs,
-      self.placeholders.labels: labels,
-      self.placeholders.is_training_phase: is_training_phase
-    }
-
-  def _data_placeholders(self, input_layer_size, class_count):
-    with tf.name_scope("placeholders") as scope:
-      placeholders = _Record()
-      placeholders.inputs = tf.placeholder(tf.float32, [None, input_layer_size], name = 'inputs')
-      placeholders.labels = tf.placeholder(tf.float32, [None, class_count], name = 'labels')
-      placeholders.is_training_phase = tf.placeholder(tf.bool, name = 'is_training_phase')
-      return placeholders
+  def _accuracy_measure(self, placeholders, output):
+    with tf.name_scope("accuracy_measure") as scope:
+      correct_prediction = tf.equal(tf.argmax(output.clean_label_probabilities, 1), tf.argmax(placeholders.labels, 1))
+      accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
+      tf.scalar_summary("test accuracy", accuracy, ["test"])
+      return accuracy
 
   def _supervised_train_step(self, placeholders, output):
     with tf.name_scope("supervised_training") as scope:
@@ -96,13 +90,6 @@ class Model:
     with tf.name_scope("unsupervised_training") as scope:
       autoencoder_cost = self._autoencoder_cost(placeholders, output, "unsupervised")
       return self._optimizer(self.hyperparameters["learning_rate"], autoencoder_cost)
-
-  def _accuracy_measure(self, placeholders, output):
-    with tf.name_scope("accuracy_measure") as scope:
-      correct_prediction = tf.equal(tf.argmax(output.clean_label_probabilities, 1), tf.argmax(placeholders.labels, 1))
-      accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
-      tf.scalar_summary("test accuracy", accuracy, ["test"])
-      return accuracy
 
   def _optimizer(self, learning_rate, cost_function):
     with tf.name_scope("optimizer") as scope:
@@ -141,6 +128,23 @@ class Model:
           placeholders.labels * tf.log(output.corrupted_label_probabilities))
       tf.scalar_summary("cross entropy", cross_entropy, ["supervised"])
       return cross_entropy
+
+
+class _Placeholders:
+  def __init__(self, input_layer_size, class_count):
+    with tf.name_scope("placeholders") as scope:
+      self.inputs = tf.placeholder(tf.float32, [None, input_layer_size], name = 'inputs')
+      self.labels = tf.placeholder(tf.float32, [None, class_count], name = 'labels')
+      self.is_training_phase = tf.placeholder(tf.bool, name = 'is_training_phase')
+
+  def placements(self, inputs, labels = None, is_training_phase = True):
+    if labels is None:
+      labels = numpy.zeros([inputs.shape[0], _layer_size(self.labels)])
+    return {
+      self.inputs: inputs,
+      self.labels: labels,
+      self.is_training_phase: is_training_phase
+    }
 
 
 class _ForwardPass:
@@ -273,9 +277,6 @@ class _DecoderLayer:
       self.post_activation = post_activation
       self.post_2nd_normalization = post_2nd_normalization
 
-
-class _Record:
-  pass
 
 def _weight_variable(shape):
   with tf.name_scope("weight") as scope:
