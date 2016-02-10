@@ -57,7 +57,7 @@ class Model:
 
     self.placeholders = self._data_placeholders(
         input_layer_size, class_count)
-    self.output = self._forward_pass(self.placeholders)
+    self.output = _ForwardPass(self.placeholders, self.hyperparameters)
     self.supervised_train_step = self._supervised_train_step(
         self.placeholders, self.output)
     self.unsupervised_train_step = self._unsupervised_train_step(
@@ -78,48 +78,13 @@ class Model:
       self.placeholders.is_training_phase: is_training_phase
     }
 
-  class _Record:
-    pass
-
   def _data_placeholders(self, input_layer_size, class_count):
     with tf.name_scope("placeholders") as scope:
-      placeholders = self._Record()
+      placeholders = _Record()
       placeholders.inputs = tf.placeholder(tf.float32, [None, input_layer_size], name = 'inputs')
       placeholders.labels = tf.placeholder(tf.float32, [None, class_count], name = 'labels')
       placeholders.is_training_phase = tf.placeholder(tf.bool, name = 'is_training_phase')
       return placeholders
-
-  def _forward_pass(self, placeholders):
-    encoder_layer_definitions = [
-      (100, tf.nn.relu),
-      (50, tf.nn.relu),
-      (_layer_size(placeholders.labels), tf.nn.softmax)
-    ]
-    clean_encoder_outputs = self._encoder_layers(
-        input_layer = placeholders.inputs,
-        other_layer_definitions = encoder_layer_definitions,
-        noise_level = 0.0,
-        is_training_phase = placeholders.is_training_phase)
-
-    corrupted_encoder_outputs = self._encoder_layers(
-        input_layer = placeholders.inputs,
-        other_layer_definitions = encoder_layer_definitions,
-        noise_level = self.hyperparameters["noise_level"],
-        is_training_phase = placeholders.is_training_phase)
-
-    decoder_outputs = self._decoder_layers(
-        clean_encoder_layers = clean_encoder_outputs,
-        corrupted_encoder_layers = corrupted_encoder_outputs,
-        is_training_phase = placeholders.is_training_phase)
-
-    output = self._Record()
-    output.clean_label_probabilities = clean_encoder_outputs[-1].post_activation
-    output.corrupted_label_probabilities = corrupted_encoder_outputs[-1].post_activation
-    output.autoencoded_inputs = decoder_outputs[-1]
-    output.clean_encoder_outputs = clean_encoder_outputs
-    output.corrupted_encoder_outputs = corrupted_encoder_outputs
-    output.decoder_outputs = decoder_outputs
-    return output
 
   def _supervised_train_step(self, placeholders, output):
     with tf.name_scope("supervised_training") as scope:
@@ -138,55 +103,6 @@ class Model:
       accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
       tf.scalar_summary("test accuracy", accuracy, ["test"])
       return accuracy
-
-  def _encoder_layers(self,
-      input_layer, other_layer_definitions,
-      noise_level, is_training_phase):
-    with tf.name_scope("encoder") as scope:
-      input_layer_size = _layer_size(input_layer)
-
-      first_encoder_layer = self._Record()
-      first_encoder_layer.post_activation = input_layer
-      first_encoder_layer.pre_activation = input_layer
-      first_encoder_layer.batch_mean = tf.zeros_like(input_layer)
-      first_encoder_layer.batch_std = tf.ones_like(input_layer)
-
-      layer_accumulator = [first_encoder_layer]
-      for (layer_size, non_linearity) in other_layer_definitions:
-        layer_output = _EncoderLayer(
-            inputs = layer_accumulator[-1].post_activation,
-            output_size = layer_size,
-            non_linearity = non_linearity,
-            noise_level = noise_level,
-            is_training_phase = is_training_phase)
-
-        layer_accumulator.append(layer_output)
-      return layer_accumulator
-
-  def _decoder_layers(self, clean_encoder_layers, corrupted_encoder_layers,
-        is_training_phase):
-    with tf.name_scope("decoder") as scope:
-      last_corrupted_encoder_layer = corrupted_encoder_layers[-1]
-      last_clean_encoder_layer = clean_encoder_layers[-1]
-      rest_of_encoder_layers = zip(clean_encoder_layers, corrupted_encoder_layers)[:-1]
-
-      first_decoder_layer = _DecoderLayer(
-          previous_decoder_layer = last_corrupted_encoder_layer,
-          corrupted_encoder_layer = last_corrupted_encoder_layer,
-          clean_encoder_layer = last_clean_encoder_layer,
-          is_training_phase = is_training_phase,
-          is_first_decoder = True
-      )
-
-      layer_accumulator = [first_decoder_layer]
-      for clean_layer, corrupted_layer in reversed(rest_of_encoder_layers):
-        layer = _DecoderLayer(
-            previous_decoder_layer = layer_accumulator[-1],
-            clean_encoder_layer = clean_layer,
-            corrupted_encoder_layer = corrupted_layer,
-            is_training_phase = is_training_phase)
-        layer_accumulator.append(layer)
-      return layer_accumulator
 
   def _optimizer(self, learning_rate, cost_function):
     with tf.name_scope("optimizer") as scope:
@@ -226,14 +142,88 @@ class Model:
       tf.scalar_summary("cross entropy", cross_entropy, ["supervised"])
       return cross_entropy
 
-def _weight_variable(shape):
-  with tf.name_scope("weight") as scope:
-    initial = tf.truncated_normal(shape, stddev = 0.1)
-    return tf.Variable(initial)
 
-def _layer_size(layer_output):
-  return layer_output.get_shape()[-1].value
+class _ForwardPass:
+  def __init__(self, placeholders, hyperparameters):
+    encoder_layer_definitions = [
+      (100, tf.nn.relu),
+      (50, tf.nn.relu),
+      (_layer_size(placeholders.labels), tf.nn.softmax)
+    ]
+    clean_encoder_outputs = self._encoder_layers(
+        input_layer = placeholders.inputs,
+        other_layer_definitions = encoder_layer_definitions,
+        noise_level = 0.0,
+        is_training_phase = placeholders.is_training_phase)
 
+    corrupted_encoder_outputs = self._encoder_layers(
+        input_layer = placeholders.inputs,
+        other_layer_definitions = encoder_layer_definitions,
+        noise_level = hyperparameters["noise_level"],
+        is_training_phase = placeholders.is_training_phase)
+
+    decoder_outputs = self._decoder_layers(
+        clean_encoder_layers = clean_encoder_outputs,
+        corrupted_encoder_layers = corrupted_encoder_outputs,
+        is_training_phase = placeholders.is_training_phase)
+
+    self.clean_label_probabilities = clean_encoder_outputs[-1].post_activation
+    self.corrupted_label_probabilities = corrupted_encoder_outputs[-1].post_activation
+    self.autoencoded_inputs = decoder_outputs[-1]
+    self.clean_encoder_outputs = clean_encoder_outputs
+    self.corrupted_encoder_outputs = corrupted_encoder_outputs
+    self.decoder_outputs = decoder_outputs
+
+  def _encoder_layers(self,
+      input_layer, other_layer_definitions,
+      noise_level, is_training_phase):
+    with tf.name_scope("encoder") as scope:
+      first_encoder_layer = _InputLayerWrapper(input_layer)
+
+      layer_accumulator = [first_encoder_layer]
+      for (layer_size, non_linearity) in other_layer_definitions:
+        layer_output = _EncoderLayer(
+            inputs = layer_accumulator[-1].post_activation,
+            output_size = layer_size,
+            non_linearity = non_linearity,
+            noise_level = noise_level,
+            is_training_phase = is_training_phase)
+
+        layer_accumulator.append(layer_output)
+      return layer_accumulator
+
+  def _decoder_layers(self, clean_encoder_layers, corrupted_encoder_layers,
+        is_training_phase):
+    with tf.name_scope("decoder") as scope:
+      last_corrupted_encoder_layer = corrupted_encoder_layers[-1]
+      last_clean_encoder_layer = clean_encoder_layers[-1]
+      rest_of_encoder_layers = zip(clean_encoder_layers, corrupted_encoder_layers)[:-1]
+
+      first_decoder_layer = _DecoderLayer(
+          previous_decoder_layer = last_corrupted_encoder_layer,
+          corrupted_encoder_layer = last_corrupted_encoder_layer,
+          clean_encoder_layer = last_clean_encoder_layer,
+          is_training_phase = is_training_phase,
+          is_first_decoder = True
+      )
+
+      layer_accumulator = [first_decoder_layer]
+      for clean_layer, corrupted_layer in reversed(rest_of_encoder_layers):
+        layer = _DecoderLayer(
+            previous_decoder_layer = layer_accumulator[-1],
+            clean_encoder_layer = clean_layer,
+            corrupted_encoder_layer = corrupted_layer,
+            is_training_phase = is_training_phase)
+        layer_accumulator.append(layer)
+      return layer_accumulator
+
+
+class _InputLayerWrapper:
+  def __init__(self, input_layer):
+    self.pre_activation = input_layer
+    self.post_activation = input_layer
+    self.batch_mean = tf.zeros_like(input_layer)
+    self.batch_std = tf.ones_like(input_layer)
 
 
 class _EncoderLayer:
@@ -282,4 +272,17 @@ class _DecoderLayer:
       self.pre_activation = pre_activation
       self.post_activation = post_activation
       self.post_2nd_normalization = post_2nd_normalization
+
+
+class _Record:
+  pass
+
+def _weight_variable(shape):
+  with tf.name_scope("weight") as scope:
+    initial = tf.truncated_normal(shape, stddev = 0.1)
+    return tf.Variable(initial)
+
+def _layer_size(layer_output):
+  return layer_output.get_shape()[-1].value
+
 
