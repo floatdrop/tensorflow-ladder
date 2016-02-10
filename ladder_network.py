@@ -57,7 +57,12 @@ class Model:
     self.hyperparameters = {
       "learning_rate": 0.003,
       "noise_level": 0.2,
-      "denoising_cost_multiplier": 0.00001
+      "denoising_cost_multiplier": 0.00001,
+      "encoder_layer_definitions": [
+        (100, tf.nn.relu),
+        (50, tf.nn.relu),
+        (class_count, tf.nn.softmax)
+      ]
     }
 
     self.placeholders = _Placeholders(input_layer_size, class_count)
@@ -153,11 +158,7 @@ class _Placeholders:
 
 class _ForwardPass:
   def __init__(self, placeholders, hyperparameters):
-    encoder_layer_definitions = [
-      (100, tf.nn.relu),
-      (50, tf.nn.relu),
-      (_layer_size(placeholders.labels), tf.nn.softmax)
-    ]
+    encoder_layer_definitions = hyperparameters["encoder_layer_definitions"]
     clean_encoder_outputs = self._encoder_layers(
         input_layer = placeholders.inputs,
         other_layer_definitions = encoder_layer_definitions,
