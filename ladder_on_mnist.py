@@ -1,6 +1,7 @@
 import random
 import input_data
 import ladder_network
+import tensorflow as tf
 
 mnist = input_data.read_data_sets(
     "MNIST_data/",
@@ -13,7 +14,26 @@ print mnist.train_labeled.num_examples, "labeled training examples"
 print mnist.validation.num_examples, "validation examples"
 print mnist.test.num_examples, "test examples"
 
-model = ladder_network.Model(input_layer_size = 784, class_count = 10)
+
+hyperparameters = {
+  "learning_rate": 0.01,
+  "noise_level": 0.2,
+  "input_layer_size": 784,
+  "class_count": 10,
+  "encoder_layer_definitions": [
+    (100, tf.nn.relu), # first hidden layer
+    (50, tf.nn.relu),
+    (10, tf.nn.softmax) # output layer
+  ],
+  "denoising_cost_multipliers": [
+    1000, # input layer
+    0.5, # first hidden layer
+    0.1,
+    0.1 # output layer
+  ]
+}
+
+model = ladder_network.Model(**hyperparameters)
 
 with ladder_network.Session(model) as session:
   for step in xrange(1000):

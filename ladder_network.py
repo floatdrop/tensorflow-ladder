@@ -55,25 +55,24 @@ class Session:
 
 
 class Model:
-  def __init__(self, input_layer_size, class_count):
-    self.hyperparameters = {
-      "learning_rate": 0.01,
-      "noise_level": 0.2,
-      "encoder_layer_definitions": [
-        (100, tf.nn.relu), # first hidden layer
-        (50, tf.nn.relu),
-        (class_count, tf.nn.softmax)
-      ],
-      "denoising_cost_multipliers": [
-        1000, # input layer
-        0.5,
-        0.1,
-        0.1 # output layer
-      ]
-    }
+  def __init__(self,
+      learning_rate,
+      noise_level,
+      input_layer_size,
+      class_count,
+      encoder_layer_definitions,
+      denoising_cost_multipliers):
+    assert class_count == encoder_layer_definitions[-1][0]
+
+    self.learning_rate = learning_rate
+    self.denoising_cost_multipliers = denoising_cost_multipliers
 
     self.placeholders = _Placeholders(input_layer_size, class_count)
-    self.output = _ForwardPass(self.placeholders, self.hyperparameters)
+
+    self.output = _ForwardPass(self.placeholders,
+        noise_level=noise_level,
+        encoder_layer_definitions=encoder_layer_definitions)
+
     self.accuracy_measure = self._accuracy_measure(
         self.placeholders, self.output)
     self.supervised_train_step = self._supervised_train_step(
@@ -99,7 +98,7 @@ class Model:
   def _supervised_train_step(self, placeholders, output):
     with tf.name_scope("supervised_training") as scope:
       total_cost = self._total_cost(placeholders, output)
-      return self._optimizer(self.hyperparameters["learning_rate"], total_cost, ["supervised"])
+      return self._optimizer(self.learning_rate, total_cost, ["supervised"])
 
   def _unsupervised_train_step(self, placeholders, output):
     with tf.name_scope("unsupervised_training") as scope:
@@ -110,7 +109,7 @@ class Model:
       for index, layer_cost in enumerate(layer_denoising_costs):
         tf.scalar_summary("layer %i denoising cost" % index, layer_cost, summary_tags)
       return self._optimizer(
-          self.hyperparameters["learning_rate"], total_denoising_cost, summary_tags)
+          self.learning_rate, total_denoising_cost, summary_tags)
 
   def _optimizer(self, learning_rate, cost_function, summary_tags):
     with tf.name_scope("optimizer") as scope:
@@ -157,11 +156,10 @@ class Model:
 
   def _total_denoising_cost(self, placeholders, output):
     with tf.name_scope("denoising_cost") as scope:
-      denoising_cost_multipliers = self.hyperparameters["denoising_cost_multipliers"]
       layer_costs = [self._layer_denoising_cost(*params) for params in zip(
           output.clean_encoder_outputs,
           reversed(output.decoder_outputs),
-          denoising_cost_multipliers)]
+          self.denoising_cost_multipliers)]
       total_denoising_cost = sum(layer_costs)
 
       return total_denoising_cost, layer_costs
@@ -191,9 +189,7 @@ class _Placeholders:
 
 
 class _ForwardPass:
-  def __init__(self, placeholders, hyperparameters):
-    encoder_layer_definitions = hyperparameters["encoder_layer_definitions"]
-
+  def __init__(self, placeholders, encoder_layer_definitions, noise_level):
     with tf.name_scope("clean_encoder") as scope:
       clean_encoder_outputs = self._encoder_layers(
           input_layer = placeholders.inputs,
@@ -205,7 +201,7 @@ class _ForwardPass:
           input_layer = placeholders.inputs,
           other_layer_definitions = encoder_layer_definitions,
           is_training_phase = placeholders.is_training_phase,
-          noise_level = hyperparameters["noise_level"],
+          noise_level = noise_level,
           reuse_variables = clean_encoder_outputs[1:])
 
     with tf.name_scope("decoder") as scope:
