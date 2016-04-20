@@ -10,8 +10,8 @@ class Session:
     self.session = tf.Session()
     self.model = model
     self.writer = tf.train.SummaryWriter(
-        logdir = strftime("logs/%Y-%m-%d_%H:%M:%S"),
-        graph_def = self.session.graph_def)
+        logdir = strftime("logs/%Y-%m-%d_%H-%M-%S"),
+        graph = self.session.graph)
 
   def __enter__(self):
     self.session.run(tf.initialize_all_variables())
