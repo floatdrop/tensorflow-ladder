@@ -160,13 +160,16 @@ class DataSet(object):
     return self._images[start:end], self._labels[start:end]
 
 
-def read_data_sets(train_dir, fake_data=False, one_hot=False):
+def read_data_sets(
+    train_dir, fake_data=False, one_hot=False,
+    validation_size=5000, labeled_size=40000):
   class DataSets(object):
     pass
   data_sets = DataSets()
 
   if fake_data:
-    data_sets.train = DataSet([], [], fake_data=True, one_hot=one_hot)
+    data_sets.train_unlabeled = DataSet([], [], fake_data=True, one_hot=one_hot)
+    data_sets.train_labeled = DataSet([], [], fake_data=True, one_hot=one_hot)
     data_sets.validation = DataSet([], [], fake_data=True, one_hot=one_hot)
     data_sets.test = DataSet([], [], fake_data=True, one_hot=one_hot)
     return data_sets
@@ -175,8 +178,6 @@ def read_data_sets(train_dir, fake_data=False, one_hot=False):
   TRAIN_LABELS = 'train-labels-idx1-ubyte.gz'
   TEST_IMAGES = 't10k-images-idx3-ubyte.gz'
   TEST_LABELS = 't10k-labels-idx1-ubyte.gz'
-  VALIDATION_SIZE = 5000
-  UNLABELED_SIZE = 40000
 
   local_file = maybe_download(TRAIN_IMAGES, train_dir)
   train_images = extract_images(local_file)
@@ -190,16 +191,26 @@ def read_data_sets(train_dir, fake_data=False, one_hot=False):
   local_file = maybe_download(TEST_LABELS, train_dir)
   test_labels = extract_labels(local_file, one_hot=one_hot)
 
-  validation_images = train_images[:VALIDATION_SIZE]
-  validation_labels = train_labels[:VALIDATION_SIZE]
-  train_unlabeled_images = train_images[VALIDATION_SIZE:VALIDATION_SIZE+UNLABELED_SIZE]
-  train_unlabeled_labels = train_labels[VALIDATION_SIZE:VALIDATION_SIZE+UNLABELED_SIZE]
-  train_images = train_images[VALIDATION_SIZE+UNLABELED_SIZE:]
-  train_labels = train_labels[VALIDATION_SIZE+UNLABELED_SIZE:]
+  assert len(train_labels) == len(train_images)
+  assert len(test_labels) == len(test_images)
+
+  unlabeled_size = len(train_images) - labeled_size - validation_size
+  assert unlabeled_size > 0
+
+  validation_images = train_images[:validation_size]
+  validation_labels = train_labels[:validation_size]
+  train_unlabeled_images = train_images[validation_size:validation_size+unlabeled_size]
+  train_unlabeled_labels = train_labels[validation_size:validation_size+unlabeled_size]
+  train_labeled_images = train_images[validation_size+unlabeled_size:]
+  train_labeled_labels = train_labels[validation_size+unlabeled_size:]
+
+  assert len(validation_images) == len(validation_labels) == validation_size
+  assert len(train_unlabeled_images) == len(train_unlabeled_labels) == unlabeled_size
+  assert len(train_labeled_images) == len(train_labeled_labels) == labeled_size
 
   train_unlabeled_labels.fill(0)
 
-  data_sets.train = DataSet(train_images, train_labels)
+  data_sets.train_labeled = DataSet(train_labeled_images, train_labeled_labels)
   data_sets.train_unlabeled = DataSet(train_unlabeled_images, train_unlabeled_labels)
   data_sets.validation = DataSet(validation_images, validation_labels)
   data_sets.test = DataSet(test_images, test_labels)
