@@ -33,9 +33,9 @@ hyperparameters = {
   ]
 }
 
-model = ladder_network.Model(**hyperparameters)
+graph = ladder_network.Graph(**hyperparameters)
 
-with ladder_network.Session(model) as session:
+with ladder_network.Session(graph) as session:
   for step in xrange(1000):
     if step % 5 == 0:
       images, labels = mnist.train_labeled.next_batch(100)

@@ -54,7 +54,7 @@ class Session:
     return action_result
 
 
-class Model:
+class Graph:
   def __init__(self,
       learning_rate,
       noise_level,
