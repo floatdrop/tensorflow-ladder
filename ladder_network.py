@@ -6,9 +6,9 @@ from time import strftime
 
 
 class Session:
-  def __init__(self, model):
+  def __init__(self, graph):
     self.session = tf.Session()
-    self.model = model
+    self.graph = graph
     self.writer = tf.train.SummaryWriter(
         logdir = strftime("logs/%Y-%m-%d_%H-%M-%S"),
         graph = self.session.graph)
@@ -21,23 +21,23 @@ class Session:
     self.session.close()
 
   def train_supervised_batch(self, inputs, labels, step_number):
-    return self._run(self.model.supervised_train_step,
-        summary_action = self.model.supervised_summaries,
+    return self._run(self.graph.supervised_train_step,
+        summary_action = self.graph.supervised_summaries,
         step_number = step_number,
         inputs = inputs,
         labels = labels,
         is_training_phase = True)
 
   def train_unsupervised_batch(self, inputs, step_number):
-    return self._run(self.model.unsupervised_train_step,
-        summary_action = self.model.unsupervised_summaries,
+    return self._run(self.graph.unsupervised_train_step,
+        summary_action = self.graph.unsupervised_summaries,
         step_number = step_number,
         inputs = inputs,
         is_training_phase = True)
 
   def test(self, inputs, labels, step_number):
-    result = self._run(self.model.accuracy_measure,
-        summary_action = self.model.test_summaries,
+    result = self._run(self.graph.accuracy_measure,
+        summary_action = self.graph.test_summaries,
         step_number = step_number,
         inputs = inputs,
         labels = labels,
@@ -45,8 +45,11 @@ class Session:
     self.writer.flush()
     return result
 
+  def save(self):
+    return self.graph.saver.save(self.session, "checkpoints")
+
   def _run(self, action, summary_action, step_number, inputs, labels = None, is_training_phase = True):
-    variable_placements = self.model.placeholders.placements(
+    variable_placements = self.graph.placeholders.placements(
         inputs, labels, is_training_phase)
     action_result, summary = self.session.run(
         [action, summary_action], variable_placements)
@@ -83,6 +86,8 @@ class Graph:
     self.unsupervised_summaries = tf.merge_all_summaries("unsupervised")
     self.supervised_summaries = tf.merge_all_summaries("supervised")
     self.test_summaries = tf.merge_all_summaries("test")
+
+    self.saver = tf.train.Saver()
 
   def _accuracy_measure(self, placeholders, output):
     with tf.name_scope("accuracy_measure") as scope:

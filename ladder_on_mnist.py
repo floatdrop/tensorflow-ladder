@@ -3,12 +3,14 @@ import input_data
 import ladder_network
 import tensorflow as tf
 
+print "Loading MNIST data"
 mnist = input_data.read_data_sets(
     "MNIST_data/",
     one_hot=True,
     labeled_size=5000,
     validation_size=5000)
 
+print
 print mnist.train_unlabeled.num_examples, "unlabeled training examples"
 print mnist.train_labeled.num_examples, "labeled training examples"
 print mnist.validation.num_examples, "validation examples"
@@ -45,5 +47,9 @@ with ladder_network.Session(graph) as session:
       session.train_unsupervised_batch(images, step)
 
     if step % 200 == 0:
-      print session.test(
+      save_path = session.save()
+      accuracy = session.test(
         mnist.validation.images, mnist.validation.labels, step)
+      print
+      print "Model saved in file: %s" % save_path
+      print "Accuracy: %f" % accuracy
