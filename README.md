@@ -1,4 +1,4 @@
-Implementation of the Ladder network algorithm. I wrote this as an exercise when learning TensorFlow, and I never got really good results with it. I leave it here as an inspiration to others, but be warned that this may not be a good reference for neither Ladder network nor idiomatic TensorFlow code.
+Implementation of the Ladder network algorithm. I wrote this as an exercise when learning TensorFlow, and I never got really good results with it. I leave it here as an inspiration to others, but be warned that this may not be a good reference for neither Ladder network nor idiomatic TensorFlow code. For a working TensorFlow Ladder, I urge you to take a look at [Rinu's implementation](https://github.com/rinuboney/ladder).
 
 The code is based on the following:
 
